@@ -15,8 +15,7 @@ const GITHUB_USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/
 
 const DEFAULT_MIN_STARS = 50;
 
-/** 2s buffer before Vercel Hobby's 10s function timeout. */
-const FUNCTION_TIMEOUT_MS = 8000;
+const FUNCTION_TIMEOUT_MS = 25_000;
 
 interface BadgeResponse {
   schemaVersion: number;
