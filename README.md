@@ -112,7 +112,7 @@ Deploy your own instance to Vercel:
 
 ```bash
 pnpm install       # Install dependencies
-pnpm test          # Run all tests (91 tests across 7 files)
+pnpm test          # Run all tests (103 tests across 8 files)
 pnpm run typecheck # TypeScript check
 vercel dev         # Local dev server
 ```
@@ -138,7 +138,7 @@ lib/
 └── *.test.ts               # Co-located tests
 ```
 
-The card, recent, and activity endpoints use the shared `createWidgetHandler` factory. The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
+The card, recent, activity, and top-repos endpoints use the shared `createWidgetHandler` factory. The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
 
 ## License
 
