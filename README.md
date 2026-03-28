@@ -17,6 +17,12 @@ Live SVG widgets for GitHub contribution stats. Embed auto-updating stats in you
 </picture>
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://oss-widgets.vercel.app/api/top-repos/costajohnt?theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://oss-widgets.vercel.app/api/top-repos/costajohnt?theme=light" />
+  <img alt="Top Contributed Repos" src="https://oss-widgets.vercel.app/api/top-repos/costajohnt?theme=dark" />
+</picture>
+
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=dark" />
   <source media="(prefers-color-scheme: light)" srcset="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=light" />
   <img alt="Recent Contributions" src="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=dark" />
@@ -32,6 +38,14 @@ Shows merged PR count, merge rate, repo count, current streak, and a 12-week spa
 
 ```markdown
 [![OSS Contributions](https://oss-widgets.vercel.app/api/card/YOUR_USERNAME)](https://github.com/YOUR_USERNAME)
+```
+
+### Top Contributed Repos
+
+Shows your top 8 external repos (excluding your own) sorted by merged PR count in the last 12 months.
+
+```markdown
+![Top Repos](https://oss-widgets.vercel.app/api/top-repos/YOUR_USERNAME)
 ```
 
 ### Recent Contributions
@@ -110,11 +124,13 @@ api/
 ├── card/[username].ts      # Stats card endpoint
 ├── recent/[username].ts    # Recent contributions endpoint
 ├── activity/[username].ts  # Activity graph endpoint
+├── top-repos/[username].ts # Top contributed repos endpoint
 └── badge/[username].ts     # Shields.io badge endpoint (JSON, standalone)
 lib/
 ├── endpoint-handler.ts     # Shared handler factory (cache, timeout, error SVGs)
 ├── github-data.ts          # GitHub API data fetching + types
 ├── svg-card.ts             # Stats card SVG renderer
+├── svg-top-repos.ts        # Top contributed repos SVG renderer
 ├── svg-recent.ts           # Recent contributions SVG renderer
 ├── svg-activity.ts         # Activity graph SVG renderer
 ├── svg-utils.ts            # Shared SVG utilities (themes, icons, escaping)
