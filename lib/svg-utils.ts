@@ -1,3 +1,7 @@
+import type { ThemeMode } from './github-data.js';
+
+export type { ThemeMode };
+
 export interface ThemeColors {
   bg: string;
   text: string;
@@ -6,7 +10,7 @@ export interface ThemeColors {
   cardBg: string;
 }
 
-export function theme(mode: 'light' | 'dark'): ThemeColors {
+export function theme(mode: ThemeMode): ThemeColors {
   if (mode === 'dark') {
     return { bg: '#0d1117', text: '#e6edf3', textSecondary: '#8b949e', border: '#30363d', cardBg: '#161b22' };
   }
@@ -37,7 +41,7 @@ export function crystalIcon(size: number): string {
   </g>`;
 }
 
-export function svgWrapper(width: number, height: number, content: string, mode: 'light' | 'dark'): string {
+export function svgWrapper(width: number, height: number, content: string, mode: ThemeMode): string {
   const t = theme(mode);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none">
   ${gradientDefs()}

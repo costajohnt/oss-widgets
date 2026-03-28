@@ -1,4 +1,4 @@
-import type { ContributionData } from './github-data.js';
+import type { ContributionData, ThemeMode } from './github-data.js';
 import { crystalIcon, svgWrapper, theme, REPO_COLORS, truncate, escapeXml } from './svg-utils.js';
 
 const WIDTH = 495;
@@ -23,7 +23,7 @@ function timeAgo(dateStr: string): string {
   return `${diffYears} yr ago`;
 }
 
-export function renderRecentCard(data: ContributionData, mode: 'light' | 'dark'): string {
+export function renderRecentCard(data: ContributionData, mode: ThemeMode): string {
   const t = theme(mode);
   const prs = data.recentPRs.slice(0, 5);
 

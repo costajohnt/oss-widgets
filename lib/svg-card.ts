@@ -1,4 +1,4 @@
-import type { ContributionData } from './github-data.js';
+import type { ContributionData, ThemeMode } from './github-data.js';
 import { crystalIcon, svgWrapper, theme } from './svg-utils.js';
 
 const WIDTH = 495;
@@ -40,7 +40,7 @@ function buildSparkline(
   return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
 }
 
-export function renderStatsCard(data: ContributionData, mode: 'light' | 'dark'): string {
+export function renderStatsCard(data: ContributionData, mode: ThemeMode): string {
   const t = theme(mode);
   const iconSize = 24;
   const iconX = 16;

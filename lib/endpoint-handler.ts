@@ -1,20 +1,12 @@
-import type { IncomingMessage, ServerResponse } from 'http';
 import {
   fetchContributionData,
   isValidUsername,
   type ContributionData,
   type ContributionResult,
+  type ThemeMode,
 } from './github-data.js';
-import { escapeXml } from './svg-utils.js';
-
-/** Minimal Vercel request/response types (avoids heavy @vercel/node devDependency). */
-interface VercelRequest extends IncomingMessage {
-  query: Record<string, string | string[]>;
-}
-interface VercelResponse extends ServerResponse {
-  status(code: number): VercelResponse;
-  send(body: string): VercelResponse;
-}
+import { escapeXml, theme as getTheme } from './svg-utils.js';
+import type { VercelRequest, VercelResponse } from './vercel-types.js';
 
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const STALE_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -31,17 +23,15 @@ export interface WidgetHandlerConfig {
   errorWidth: number;
   errorHeight: number;
   errorTextY: number;
-  render: (data: ContributionData, mode: 'light' | 'dark') => string;
+  render: (data: ContributionData, mode: ThemeMode) => string;
 }
 
-function makeErrorSvg(message: string, mode: 'light' | 'dark', config: WidgetHandlerConfig): string {
+function makeErrorSvg(message: string, mode: ThemeMode, config: WidgetHandlerConfig): string {
   const { errorWidth: width, errorHeight: height, errorTextY: textY } = config;
-  const bg = mode === 'dark' ? '#0d1117' : '#ffffff';
-  const text = mode === 'dark' ? '#e6edf3' : '#1e293b';
-  const border = mode === 'dark' ? '#30363d' : '#e2e8f0';
+  const t = getTheme(mode);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none">
-  <rect width="${width}" height="${height}" rx="8" fill="${bg}" stroke="${border}" stroke-width="1"/>
-  <text x="${Math.round(width / 2)}" y="${textY}" font-family="system-ui,sans-serif" font-size="13" fill="${text}" text-anchor="middle">${escapeXml(message)}</text>
+  <rect width="${width}" height="${height}" rx="8" fill="${t.bg}" stroke="${t.border}" stroke-width="1"/>
+  <text x="${Math.round(width / 2)}" y="${textY}" font-family="system-ui,sans-serif" font-size="13" fill="${t.text}" text-anchor="middle">${escapeXml(message)}</text>
 </svg>`;
 }
 
@@ -49,18 +39,18 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
   const { prefix, render } = config;
   const cache = new Map<string, CacheEntry>();
 
-  function errorSvg(message: string, mode: 'light' | 'dark'): string {
+  function errorSvg(message: string, mode: ThemeMode): string {
     return makeErrorSvg(message, mode, config);
   }
 
   return async function handler(req: VercelRequest, res: VercelResponse) {
     const { username, theme: themeParam, cache: cacheParam } = req.query;
 
-    const mode: 'light' | 'dark' = themeParam === 'dark' ? 'dark' : 'light';
+    const mode = (themeParam === 'dark' ? 'dark' : 'light') satisfies ThemeMode;
     const noCache = cacheParam === 'no';
 
     res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    // Cache-Control is set by vercel.json at the CDN edge layer
 
     if (typeof username !== 'string' || !isValidUsername(username)) {
       return res.status(400).send(errorSvg('Invalid GitHub username', mode));
@@ -81,17 +71,21 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
 
     const computation = fetchContributionData(username, process.env.GITHUB_TOKEN);
     computation.catch((err) => {
-      console.warn(`[${prefix}] Post-timeout error for ${username}:`, err instanceof Error ? err.message : String(err));
+      console.error(`[${prefix}] Post-timeout error for ${username}:`, err instanceof Error ? err.message : String(err));
     });
 
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const result = await Promise.race([
-      computation,
-      new Promise<ContributionResult>((resolve) => {
-        timer = setTimeout(() => resolve({ error: 'api_error' as const }), TIMEOUT_MS);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
+    let result: ContributionResult;
+    try {
+      result = await Promise.race([
+        computation,
+        new Promise<ContributionResult>((resolve) => {
+          timer = setTimeout(() => resolve({ error: 'timeout' as const }), TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
 
     if (result.error) {
       // Try stale fallback before returning an error SVG
@@ -107,6 +101,9 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       if (result.error === 'rate_limited') {
         return res.status(429).send(errorSvg('GitHub API rate limit reached — try again later', mode));
       }
+      if (result.error === 'timeout') {
+        return res.status(504).send(errorSvg('Request timed out — try again later', mode));
+      }
       return res.status(502).send(errorSvg('GitHub API error — try again later', mode));
     }
 
@@ -115,10 +112,7 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       svg = render(result, mode);
     } catch (err) {
       console.error(`[${prefix}] Render failed for ${username}:`, err instanceof Error ? err.message : String(err));
-      return res
-        .status(500)
-        .setHeader('Content-Type', 'image/svg+xml')
-        .send(makeErrorSvg('Render error', mode, config));
+      return res.status(500).send(makeErrorSvg('Render error', mode, config));
     }
     cache.set(cacheKey, { svg, ts: Date.now() });
     return res.status(200).send(svg);

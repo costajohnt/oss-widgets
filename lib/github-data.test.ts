@@ -200,6 +200,22 @@ describe('computeStreak', () => {
     // Only the two most recent consecutive weeks count; the gap stops the streak
     expect(computeStreak(dailyActivity)).toBe(2);
   });
+
+  it('counts prior weeks when the current week has no activity', () => {
+    const thisMonday = mondayOf(new Date());
+    const lastMonday = addDays(thisMonday, -7);
+    const twoWeeksAgoMonday = addDays(thisMonday, -14);
+
+    // Activity in last week and the week before, but nothing in the current week
+    const dailyActivity: Record<string, number> = {
+      [dateKey(lastMonday)]: 3,
+      [dateKey(twoWeeksAgoMonday)]: 1,
+    };
+
+    // Current week is skipped (w === 0 with no activity is allowed),
+    // then last week and two weeks ago both count → streak of 2
+    expect(computeStreak(dailyActivity)).toBe(2);
+  });
 });
 
 describe('username validation', () => {

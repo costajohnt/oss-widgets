@@ -7,31 +7,34 @@ export function isValidUsername(username: string): boolean {
 }
 
 export interface RecentPR {
-  number: number;
-  title: string;
-  url: string;
-  repo: string; // "owner/repo"
-  mergedAt: string; // ISO timestamp
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly repo: string; // "owner/repo"
+  readonly mergedAt: string; // ISO timestamp
 }
 
+export type ThemeMode = 'light' | 'dark';
+
 export interface ContributionData {
-  merged: number;
-  open: number;
-  closedUnmerged: number;
-  mergeRate: number; // 0-100
-  repoCount: number;
-  recentPRs: RecentPR[];
-  cappedMerged: boolean;
-  cappedClosedUnmerged: boolean;
+  readonly merged: number;
+  readonly open: number;
+  readonly closedUnmerged: number;
+  /** Merge rate as a percentage (0-100), not a ratio. */
+  readonly mergeRate: number;
+  readonly repoCount: number;
+  readonly recentPRs: readonly RecentPR[];
+  readonly cappedMerged: boolean;
+  readonly cappedClosedUnmerged: boolean;
   /** Daily activity: map of "YYYY-MM-DD" → count of merged PRs */
-  dailyActivity: Record<string, number>;
+  readonly dailyActivity: Record<string, number>;
   /** Consecutive calendar weeks (Mon-Sun, UTC) with at least one merged PR */
-  streak: number;
-  error?: undefined;
+  readonly streak: number;
+  readonly error?: undefined;
 }
 
 export interface ContributionError {
-  error: 'user_not_found' | 'rate_limited' | 'api_error';
+  error: 'user_not_found' | 'rate_limited' | 'api_error' | 'timeout';
   merged?: undefined;
 }
 
@@ -43,7 +46,7 @@ function twelveMonthsAgo(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function extractRepo(repositoryUrl: string): string {
+export function extractRepo(repositoryUrl: string): string {
   return repositoryUrl.replace('https://api.github.com/repos/', '');
 }
 
@@ -86,7 +89,7 @@ async function paginateSearch(
   octokit: InstanceType<typeof Octokit>,
   query: string,
   maxItems: number = 1000,
-): Promise<{ totalCount: number; items: any[] }> {
+): Promise<{ totalCount: number; items: Array<{ repository_url: string; number: number; title: string; html_url: string; closed_at: string | null; pull_request?: { merged_at?: string | null } }> }> {
   const perPage = 100;
   const firstPage = await octokit.rest.search.issuesAndPullRequests({
     q: query,
@@ -157,7 +160,7 @@ export async function fetchContributionData(username: string, token: string): Pr
       const repo = extractRepo(item.repository_url);
       repos.add(repo);
 
-      const mergedAt = (item.pull_request as any)?.merged_at ?? item.closed_at ?? '';
+      const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? '';
       if (mergedAt) {
         const day = mergedAt.slice(0, 10);
         dailyActivity[day] = (dailyActivity[day] ?? 0) + 1;
@@ -186,11 +189,12 @@ export async function fetchContributionData(username: string, token: string): Pr
       dailyActivity,
       streak: computeStreak(dailyActivity),
     };
-  } catch (err: any) {
-    if (err?.status === 422) {
+  } catch (err: unknown) {
+    const status = err instanceof Object && 'status' in err ? (err as { status: number }).status : undefined;
+    if (status === 422) {
       return { error: 'user_not_found' };
     }
-    if (err?.status === 403 || err?.status === 429) {
+    if (status === 403 || status === 429) {
       console.warn('[widget] Rate limited for', username);
       return { error: 'rate_limited' };
     }

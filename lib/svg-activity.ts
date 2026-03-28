@@ -1,4 +1,4 @@
-import type { ContributionData } from './github-data.js';
+import type { ContributionData, ThemeMode } from './github-data.js';
 import { crystalIcon, svgWrapper, theme } from './svg-utils.js';
 
 const WIDTH = 495;
@@ -38,7 +38,7 @@ function intensityColor(count: number, maxCount: number): string | null {
   return ACTIVE_COLORS[0]; // darkest
 }
 
-export function renderActivityGraph(data: ContributionData, mode: 'light' | 'dark'): string {
+export function renderActivityGraph(data: ContributionData, mode: ThemeMode): string {
   const t = theme(mode);
 
   // Build date grid: 26 columns (weeks), 7 rows (Mon-Sun), newest week on the right

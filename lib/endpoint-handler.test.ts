@@ -213,6 +213,39 @@ describe('createWidgetHandler', () => {
     expect(res._body).toContain('Render error');
   });
 
+  it('returns 504 with "timed out" message when fetch never resolves', async () => {
+    vi.useFakeTimers();
+    // fetchContributionData returns a promise that never resolves
+    fetchMock.mockReturnValueOnce(new Promise(() => {}));
+
+    const handler = createWidgetHandler(BASE_CONFIG);
+    const req = makeReq({ username: 'costajohnt' });
+    const res = makeRes();
+
+    const handlerPromise = handler(req, res);
+
+    // Advance past the 25s timeout
+    await vi.advanceTimersByTimeAsync(30_000);
+    await handlerPromise;
+
+    expect(res._status).toBe(504);
+    expect(res._body).toContain('timed out');
+
+    vi.useRealTimers();
+  });
+
+  it('passes theme=dark to the render function', async () => {
+    fetchMock.mockResolvedValueOnce(makeData());
+    const handler = createWidgetHandler(BASE_CONFIG);
+    const req = makeReq({ username: 'costajohnt', theme: 'dark' });
+    const res = makeRes();
+
+    await handler(req, res);
+
+    expect(BASE_CONFIG.render).toHaveBeenCalledWith(expect.anything(), 'dark');
+    expect(res._status).toBe(200);
+  });
+
   it('serves stale cache when past CACHE_TTL but within STALE_TTL and fetch fails', async () => {
     const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 

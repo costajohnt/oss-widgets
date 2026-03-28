@@ -50,4 +50,11 @@ describe('renderStatsCard', () => {
     const svg = renderStatsCard(sampleData, 'light');
     expect(svg).toContain('<polyline');
   });
+
+  it('renders singular "week" when streak is 1', () => {
+    const singular = { ...sampleData, streak: 1 };
+    const svg = renderStatsCard(singular, 'light');
+    expect(svg).toContain('1 week');
+    expect(svg).not.toContain('1 weeks');
+  });
 });
