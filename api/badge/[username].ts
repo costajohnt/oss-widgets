@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { isValidUsername, extractRepo } from '../../lib/github-data.js';
+import { getStarsForRepos } from '../../lib/github-stars.js';
 import type { VercelRequest, VercelResponse } from '../../lib/vercel-types.js';
 
 /** Minimum star count for a repo's PRs to be included — filters out personal/trivial repos. */
@@ -27,24 +28,10 @@ export function pickColor(mergeRate: number): ShieldsColor {
   return 'orange';
 }
 
-/** In-memory cache for repo star counts (survives across warm invocations). */
-export const starCache = new Map<string, { stars: number; ts: number }>();
-const STAR_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
 /** In-memory cache for full badge results. */
 export const badgeCache = new Map<string, { badge: BadgeResponse; ts: number }>();
 const BADGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const STALE_BADGE_TTL = 24 * 60 * 60 * 1000; // 24 hours — fallback during timeouts/errors
-
-export async function getRepoStars(octokit: Octokit, owner: string, repo: string): Promise<number> {
-  const key = `${owner}/${repo}`;
-  const cached = starCache.get(key);
-  if (cached && Date.now() - cached.ts < STAR_CACHE_TTL) return cached.stars;
-
-  const { data } = await octokit.repos.get({ owner, repo });
-  starCache.set(key, { stars: data.stargazers_count, ts: Date.now() });
-  return data.stargazers_count;
-}
 
 interface PRItem {
   repository_url: string;
@@ -86,37 +73,13 @@ export async function computeBadge(username: string, minStars: number): Promise<
 
   // Collect unique repos across all PRs
   const allItems = [...mergedItems, ...closedItems, ...openItems];
-  const uniqueRepos = new Set(allItems.map((item) => extractRepo(item.repository_url)));
+  const uniqueRepos = [...new Set(allItems.map((item) => extractRepo(item.repository_url)))];
 
-  // Fetch star counts for all unique repos (parallelized, with caching)
-  const repoStarsMap = new Map<string, number>();
-  const repoEntries = [...uniqueRepos];
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < repoEntries.length; i += BATCH_SIZE) {
-    const batch = repoEntries.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map(async (repo) => {
-        const [owner, name] = repo.split('/');
-        try {
-          return { repo, stars: await getRepoStars(octokit, owner, name) };
-        } catch (err: unknown) {
-          const status = err instanceof Object && 'status' in err ? (err as { status: number }).status : undefined;
-          if (status === 404) {
-            // Repo is private or deleted — legitimately exclude
-            return { repo, stars: 0 };
-          }
-          console.warn(`[badge] Failed to fetch stars for ${repo}:`, err instanceof Error ? err.message : String(err));
-          return { repo, stars: 0 };
-        }
-      }),
-    );
-    for (const { repo, stars } of results) {
-      repoStarsMap.set(repo, stars);
-    }
-  }
+  // Fetch star counts for all unique repos (parallelized, with 24hr caching)
+  const repoStarsMap = await getStarsForRepos(octokit, uniqueRepos);
 
   // Filter qualifying repos
-  const qualifyingRepos = new Set(repoEntries.filter((repo) => (repoStarsMap.get(repo) ?? 0) >= minStars));
+  const qualifyingRepos = new Set(uniqueRepos.filter((repo) => (repoStarsMap.get(repo) ?? 0) >= minStars));
 
   // Count PRs only from qualifying repos
   const mergedCount = mergedItems.filter((item) => qualifyingRepos.has(extractRepo(item.repository_url))).length;

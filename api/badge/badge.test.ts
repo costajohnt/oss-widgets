@@ -4,11 +4,10 @@ import handler, {
   errorBadge,
   computeBadge,
   staleFallback,
-  getRepoStars,
   badgeCache,
-  starCache,
   type BadgeResponse,
 } from './[username].js';
+import { clearStarCache } from '../../lib/github-stars.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -105,7 +104,7 @@ let originalToken: string | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
   badgeCache.clear();
-  starCache.clear();
+  clearStarCache();
   originalToken = process.env.GITHUB_TOKEN;
   process.env.GITHUB_TOKEN = 'fake-token';
 });
@@ -391,7 +390,7 @@ describe('getRepoStars — error handling', () => {
     await handler(makeReq({ username: 'testuser', minStars: '0' }), res);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[badge] Failed to fetch stars for owner/failing-repo:'),
+      expect.stringContaining('[stars] Failed to fetch stars for owner/failing-repo:'),
       expect.stringContaining('Internal Server Error'),
     );
 
@@ -411,24 +410,14 @@ describe('getRepoStars — error handling', () => {
 
     // Should NOT have logged a warning for 404
     const badgeLogs = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('[badge] Failed to fetch stars'),
+      (call) => typeof call[0] === 'string' && call[0].includes('[stars] Failed to fetch stars'),
     );
     expect(badgeLogs).toHaveLength(0);
 
     warnSpy.mockRestore();
   });
 
-  it('uses cached star count within TTL', async () => {
-    // Pre-populate the star cache
-    starCache.set('owner/cached-repo', { stars: 200, ts: Date.now() });
-
-    const fakeOctokit = octokitMocks as any;
-    const stars = await getRepoStars(fakeOctokit, 'owner', 'cached-repo');
-
-    expect(stars).toBe(200);
-    // repos.get should not have been called — served from cache
-    expect(octokitMocks.repos.get).not.toHaveBeenCalled();
-  });
+  // Star cache behavior is tested in lib/github-stars.test.ts
 });
 
 // ===========================================================================
