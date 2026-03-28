@@ -2,6 +2,28 @@
 
 Live SVG widgets for GitHub contribution stats. Embed auto-updating stats in your GitHub profile README or any Markdown surface.
 
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://oss-widgets.vercel.app/api/card/costajohnt?theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://oss-widgets.vercel.app/api/card/costajohnt?theme=light" />
+  <img alt="OSS Stats" src="https://oss-widgets.vercel.app/api/card/costajohnt?theme=dark" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://oss-widgets.vercel.app/api/activity/costajohnt?theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://oss-widgets.vercel.app/api/activity/costajohnt?theme=light" />
+  <img alt="Activity Graph" src="https://oss-widgets.vercel.app/api/activity/costajohnt?theme=dark" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=light" />
+  <img alt="Recent Contributions" src="https://oss-widgets.vercel.app/api/recent/costajohnt?theme=dark" />
+</picture>
+
+</div>
+
 ## Widgets
 
 ### Stats Card
@@ -34,11 +56,13 @@ Shows a 26-week contribution heatmap with intensity-based coloring.
 ![OSS Contributions](https://img.shields.io/endpoint?url=https://oss-widgets.vercel.app/api/badge/YOUR_USERNAME)
 ```
 
+The badge shows merge rate, merged count, and open PR count. Only counts PRs to external repos with 50+ stars by default.
+
 ## Options
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `theme` | `light` (default), `dark` | Color scheme |
+| `theme` | `light` (default), `dark` | Color scheme (card, recent, activity) |
 | `cache` | `no` | Bypass the 1-hour in-memory cache |
 | `minStars` | number (default: `50`) | Minimum repo star count (badge only) |
 
@@ -56,9 +80,10 @@ For GitHub profile READMEs that respect the viewer's theme preference:
 
 ## Caching
 
-- **Browser/CDN:** 1 hour max-age + 10 min stale-while-revalidate
+- **CDN:** 1 hour max-age + 10 min stale-while-revalidate (configured in `vercel.json`)
 - **In-memory:** 1 hour TTL with 24-hour stale fallback
 - **Cache bypass:** Append `?cache=no` to any endpoint
+- **Error responses:** Badge errors are not cached at the CDN level (`no-cache, no-store`)
 
 ## Self-hosting
 
@@ -66,17 +91,38 @@ Deploy your own instance to Vercel:
 
 1. Fork this repo
 2. Create a Vercel project linked to your fork
-3. Add a `GITHUB_TOKEN` environment variable (needs no special scopes — public repo access only)
+3. Add a `GITHUB_TOKEN` environment variable — a classic PAT with no special scopes works (the GitHub Search API only needs public data access). Note: `gh auth token` OAuth tokens (`gho_*`) do not work from Vercel; use a `ghp_*` PAT.
 4. Deploy
 
 ## Development
 
 ```bash
 pnpm install       # Install dependencies
-pnpm test          # Run all tests
+pnpm test          # Run all tests (91 tests across 7 files)
 pnpm run typecheck # TypeScript check
 vercel dev         # Local dev server
 ```
+
+### Project structure
+
+```
+api/
+├── card/[username].ts      # Stats card endpoint
+├── recent/[username].ts    # Recent contributions endpoint
+├── activity/[username].ts  # Activity graph endpoint
+└── badge/[username].ts     # Shields.io badge endpoint (JSON, standalone)
+lib/
+├── endpoint-handler.ts     # Shared handler factory (cache, timeout, error SVGs)
+├── github-data.ts          # GitHub API data fetching + types
+├── svg-card.ts             # Stats card SVG renderer
+├── svg-recent.ts           # Recent contributions SVG renderer
+├── svg-activity.ts         # Activity graph SVG renderer
+├── svg-utils.ts            # Shared SVG utilities (themes, icons, escaping)
+├── vercel-types.ts         # Shared Vercel request/response shims
+└── *.test.ts               # Co-located tests
+```
+
+The card, recent, and activity endpoints use the shared `createWidgetHandler` factory. The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
 
 ## License
 
