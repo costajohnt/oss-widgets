@@ -18,7 +18,7 @@ interface VercelResponse extends ServerResponse {
 
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const STALE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 25_000;
 
 interface CacheEntry {
   svg: string;
