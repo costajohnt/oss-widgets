@@ -26,6 +26,7 @@ const sampleData: ContributionData = {
     [daysAgo(90)]: 1,
   },
   streak: 3,
+  topRepos: [],
 };
 
 const emptyData: ContributionData = {

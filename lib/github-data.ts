@@ -30,6 +30,8 @@ export interface ContributionData {
   readonly dailyActivity: Record<string, number>;
   /** Consecutive calendar weeks (Mon-Sun, UTC) with at least one merged PR */
   readonly streak: number;
+  /** Top external repos by merged PR count (excludes user's own repos), sorted descending. */
+  readonly topRepos: readonly { repo: string; count: number }[];
   readonly error?: undefined;
 }
 
@@ -152,13 +154,13 @@ export async function fetchContributionData(username: string, token: string): Pr
     const mergeTotal = merged + closedUnmerged;
     const mergeRate = mergeTotal > 0 ? (merged / mergeTotal) * 100 : 0;
 
-    const repos = new Set<string>();
+    const repoCounts = new Map<string, number>();
     const dailyActivity: Record<string, number> = {};
     const recentPRs: RecentPR[] = [];
 
     for (const item of mergedResult.items) {
       const repo = extractRepo(item.repository_url);
-      repos.add(repo);
+      repoCounts.set(repo, (repoCounts.get(repo) ?? 0) + 1);
 
       const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? '';
       if (mergedAt) {
@@ -177,17 +179,25 @@ export async function fetchContributionData(username: string, token: string): Pr
       }
     }
 
+    // Derive top external repos (exclude user's own repos), sorted by PR count
+    const topRepos = [...repoCounts.entries()]
+      .filter(([repo]) => repo.split('/')[0].toLowerCase() !== username.toLowerCase())
+      .map(([repo, count]) => ({ repo, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
     return {
       merged,
       open,
       closedUnmerged,
       mergeRate,
-      repoCount: repos.size,
+      repoCount: repoCounts.size,
       recentPRs,
       cappedMerged: merged >= 1000,
       cappedClosedUnmerged: closedUnmerged >= 1000,
       dailyActivity,
       streak: computeStreak(dailyActivity),
+      topRepos,
     };
   } catch (err: unknown) {
     const status = err instanceof Object && 'status' in err ? (err as { status: number }).status : undefined;

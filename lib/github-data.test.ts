@@ -67,6 +67,11 @@ describe('fetchContributionData', () => {
     expect(result.recentPRs).toHaveLength(2);
     expect(result.recentPRs[0].title).toBe('Fix bug');
     expect(result.cappedMerged).toBe(false);
+    // topRepos should exclude user's own repos and sort by count
+    expect(result.topRepos).toEqual([
+      { repo: 'org/repo', count: 1 },
+      { repo: 'org/repo2', count: 1 },
+    ]);
   });
 
   it('flags capped results when total_count exceeds 1000', async () => {
@@ -144,6 +149,54 @@ describe('fetchContributionData', () => {
     expect(result.merged).toBe(150);
     expect(result.repoCount).toBe(2); // org/repo + org2/repo2
     expect(result.cappedMerged).toBe(false);
+  });
+
+  it('excludes own repos from topRepos and sorts by count', async () => {
+    const items = [
+      // 3 PRs to external repo
+      ...Array.from({ length: 3 }, (_, i) => ({
+        number: i + 1,
+        title: `PR ${i + 1}`,
+        html_url: `https://github.com/external/popular/pull/${i + 1}`,
+        repository_url: 'https://api.github.com/repos/external/popular',
+        closed_at: '2026-03-01T00:00:00Z',
+        pull_request: { merged_at: '2026-03-01T00:00:00Z' },
+      })),
+      // 5 PRs to own repo (should be excluded)
+      ...Array.from({ length: 5 }, (_, i) => ({
+        number: 10 + i,
+        title: `Own PR ${i + 1}`,
+        html_url: `https://github.com/myuser/myrepo/pull/${10 + i}`,
+        repository_url: 'https://api.github.com/repos/myuser/myrepo',
+        closed_at: '2026-03-01T00:00:00Z',
+        pull_request: { merged_at: '2026-03-01T00:00:00Z' },
+      })),
+      // 1 PR to another external repo
+      {
+        number: 20,
+        title: 'Small fix',
+        html_url: 'https://github.com/other/lib/pull/20',
+        repository_url: 'https://api.github.com/repos/other/lib',
+        closed_at: '2026-03-01T00:00:00Z',
+        pull_request: { merged_at: '2026-03-01T00:00:00Z' },
+      },
+    ];
+
+    searchMock.mockResolvedValueOnce({ data: { total_count: items.length, items } });
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+
+    const result = await fetchContributionData('myuser', 'fake-token');
+
+    expect(result.error).toBeUndefined();
+    if ('error' in result && result.error) throw new Error('unexpected error');
+    // topRepos excludes myuser/myrepo and sorts by count descending
+    expect(result.topRepos).toEqual([
+      { repo: 'external/popular', count: 3 },
+      { repo: 'other/lib', count: 1 },
+    ]);
+    // repoCount includes all repos (including own)
+    expect(result.repoCount).toBe(3);
   });
 });
 

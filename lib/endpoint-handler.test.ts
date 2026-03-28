@@ -28,6 +28,7 @@ function makeData(overrides: Partial<ContributionData> = {}): ContributionData {
     cappedClosedUnmerged: false,
     dailyActivity: {},
     streak: 0,
+    topRepos: [],
     ...overrides,
   };
 }

@@ -35,6 +35,7 @@ const sampleData: ContributionData = {
   cappedClosedUnmerged: false,
   dailyActivity: { '2026-03-20': 1, '2026-03-19': 1, '2026-03-18': 1 },
   streak: 3,
+  topRepos: [],
 };
 
 const emptyData: ContributionData = {
