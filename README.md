@@ -81,7 +81,7 @@ The badge shows merge rate, merged count, and open PR count. Only counts PRs to 
 |-----------|--------|-------------|
 | `theme` | `light` (default), `dark` | Color scheme (card, recent, activity, top-repos) |
 | `cache` | `no` | Bypass the 1-hour in-memory cache |
-| `minStars` | number (default: `50`) | Minimum repo star count (badge, top-repos, recent) |
+| `minStars` | number (default: `50`) | Minimum repo star count (all endpoints) |
 
 ### Dark mode with `<picture>` tags
 
