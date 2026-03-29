@@ -62,10 +62,12 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
     // Cache-Control is set by vercel.json at the CDN edge layer
 
     if (typeof username !== 'string' || !isValidUsername(username)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store');
       return res.status(400).send(errorSvg('Invalid GitHub username', mode));
     }
 
     if (!process.env.GITHUB_TOKEN) {
+      res.setHeader('Cache-Control', 'no-cache, no-store');
       return res.status(500).send(errorSvg('Server configuration error: missing GitHub token', mode));
     }
 
