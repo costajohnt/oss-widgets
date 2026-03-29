@@ -168,7 +168,9 @@ export async function fetchContributionData(username: string, token: string): Pr
         dailyActivity[day] = (dailyActivity[day] ?? 0) + 1;
       }
 
-      if (recentPRs.length < 5) {
+      // Only include external repos in recentPRs (exclude user's own repos)
+      const isOwnRepo = repo.split('/')[0].toLowerCase() === username.toLowerCase();
+      if (!isOwnRepo && recentPRs.length < 5) {
         recentPRs.push({
           number: item.number,
           title: item.title,
