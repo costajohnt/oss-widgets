@@ -20,7 +20,7 @@ describe('renderStatsCard', () => {
   it('produces valid SVG with correct dimensions', () => {
     const svg = renderStatsCard(sampleData, 'light');
     expect(svg).toContain('width="495"');
-    expect(svg).toContain('height="195"');
+    expect(svg).toContain('height="200"');
     expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
   });
   it('displays all four metrics', () => {

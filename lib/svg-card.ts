@@ -2,7 +2,7 @@ import type { ContributionData, ThemeMode } from './github-data.js';
 import { crystalIcon, svgWrapper, theme } from './svg-utils.js';
 
 const WIDTH = 495;
-const HEIGHT = 195;
+const HEIGHT = 200;
 
 /** Build a 12-week activity sparkline polyline from dailyActivity. */
 function buildSparkline(
@@ -46,10 +46,11 @@ export function renderStatsCard(data: ContributionData, mode: ThemeMode): string
   const iconX = 16;
   const iconY = 14;
 
-  // Header: crystal icon + title
+  // Header: crystal icon + title + description
   const header = [
     `<g transform="translate(${iconX},${iconY})">${crystalIcon(iconSize)}</g>`,
-    `<text x="${iconX + iconSize + 8}" y="${iconY + 16}" font-family="system-ui,sans-serif" font-size="14" font-weight="600" fill="${t.text}">OSS Contributions</text>`,
+    `<text x="${iconX + iconSize + 8}" y="${iconY + 14}" font-family="system-ui,sans-serif" font-size="14" font-weight="600" fill="${t.text}">OSS Contributions</text>`,
+    `<text x="${iconX + iconSize + 8}" y="${iconY + 28}" font-family="system-ui,sans-serif" font-size="10" fill="${t.textSecondary}">External repos with 50+ stars · last 12 months</text>`,
   ].join('\n  ');
 
   // 4 metrics in a 2x2 grid
@@ -64,7 +65,7 @@ export function renderStatsCard(data: ContributionData, mode: ThemeMode): string
     { value: streakLabel, label: 'Streak', color: '#a855f7' },
   ];
 
-  const gridTop = 58;
+  const gridTop = 62;
   const cellW = WIDTH / 2;
   const cellH = 52;
 
