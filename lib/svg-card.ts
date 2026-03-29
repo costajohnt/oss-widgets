@@ -50,7 +50,7 @@ export function renderStatsCard(data: ContributionData, mode: ThemeMode): string
   const header = [
     `<g transform="translate(${iconX},${iconY})">${crystalIcon(iconSize)}</g>`,
     `<text x="${iconX + iconSize + 8}" y="${iconY + 14}" font-family="system-ui,sans-serif" font-size="14" font-weight="600" fill="${t.text}">OSS Contributions</text>`,
-    `<text x="${iconX + iconSize + 8}" y="${iconY + 28}" font-family="system-ui,sans-serif" font-size="10" fill="${t.textSecondary}">External repos with 50+ stars · last 12 months</text>`,
+    `<text x="${iconX + iconSize + 8}" y="${iconY + 28}" font-family="system-ui,sans-serif" font-size="10" fill="${t.textSecondary}">To major external repos · last 12 months</text>`,
   ].join('\n  ');
 
   // 4 metrics in a 2x2 grid
