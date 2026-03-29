@@ -62,12 +62,17 @@ export async function computeBadge(username: string, minStars: number): Promise<
   }
   const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
+  // 12-month window to match other widgets
+  const since = new Date();
+  since.setFullYear(since.getFullYear() - 1);
+  const sinceDate = since.toISOString().slice(0, 10);
+
   // Fetch all three categories excluding user's own repos
   const baseQuery = `is:pr author:${username} -user:${username}`;
 
   const [mergedItems, closedItems, openItems] = await Promise.all([
-    fetchAllPRs(octokit, `${baseQuery} is:merged`),
-    fetchAllPRs(octokit, `${baseQuery} is:closed is:unmerged`),
+    fetchAllPRs(octokit, `${baseQuery} is:merged merged:>=${sinceDate}`),
+    fetchAllPRs(octokit, `${baseQuery} is:closed is:unmerged closed:>=${sinceDate}`),
     fetchAllPRs(octokit, `${baseQuery} is:open`),
   ]);
 
