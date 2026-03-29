@@ -3,12 +3,30 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "Live SVG widgets for GitHub contribution stats",
+  "author": "John Costa",
+  "license": "MIT",
+  "homepage": "https://oss-widgets.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/costajohnt/oss-widgets"
+  },
+  "keywords": [
+    "github",
+    "widgets",
+    "svg",
+    "contributions",
+    "profile",
+    "stats",
+    "vercel"
+  ],
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1"

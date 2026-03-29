@@ -1,5 +1,8 @@
 # oss-widgets
 
+[![CI](https://github.com/costajohnt/oss-widgets/actions/workflows/ci.yml/badge.svg)](https://github.com/costajohnt/oss-widgets/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 Live SVG widgets for GitHub contribution stats. Embed auto-updating stats in your GitHub profile README or any Markdown surface.
 
 <div align="center">
@@ -76,9 +79,9 @@ The badge shows merge rate, merged count, and open PR count. Only counts PRs to 
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `theme` | `light` (default), `dark` | Color scheme (card, recent, activity) |
+| `theme` | `light` (default), `dark` | Color scheme (card, recent, activity, top-repos) |
 | `cache` | `no` | Bypass the 1-hour in-memory cache |
-| `minStars` | number (default: `50`) | Minimum repo star count (badge only) |
+| `minStars` | number (default: `50`) | Minimum repo star count (badge + top-repos) |
 
 ### Dark mode with `<picture>` tags
 
@@ -112,7 +115,7 @@ Deploy your own instance to Vercel:
 
 ```bash
 pnpm install       # Install dependencies
-pnpm test          # Run all tests (103 tests across 8 files)
+pnpm test          # Run all tests (102 tests across 8 files)
 pnpm run typecheck # TypeScript check
 vercel dev         # Local dev server
 ```
