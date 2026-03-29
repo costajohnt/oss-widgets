@@ -90,7 +90,12 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       const result = await fetchContributionData(username, process.env.GITHUB_TOKEN!);
       if (result.error) return result;
       if (transform) {
-        return await transform(result, req.query);
+        try {
+          return await transform(result, req.query);
+        } catch (err) {
+          console.error(`[${prefix}] Transform failed for ${username}:`, err instanceof Error ? err.message : String(err));
+          return { error: 'api_error' as const };
+        }
       }
       return result;
     })();
@@ -121,6 +126,9 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
         return res.status(200).send(stale.svg);
       }
 
+      // Don't let CDN cache error SVGs (vercel.json sets s-maxage=3600 by default)
+      res.setHeader('Cache-Control', 'no-cache, no-store');
+
       if (result.error === 'user_not_found') {
         return res.status(404).send(errorSvg(`GitHub user "${username}" not found`, mode));
       }
@@ -138,6 +146,7 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       svg = render(result, mode);
     } catch (err) {
       console.error(`[${prefix}] Render failed for ${username}:`, err instanceof Error ? err.message : String(err));
+      res.setHeader('Cache-Control', 'no-cache, no-store');
       return res.status(500).send(makeErrorSvg('Render error', mode, config));
     }
     cache.set(cacheKey, { svg, ts: Date.now() });

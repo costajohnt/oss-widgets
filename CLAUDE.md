@@ -44,5 +44,5 @@ Deployed to Vercel. Requires `GITHUB_TOKEN` environment variable in Vercel proje
 - No build step — Vercel compiles TypeScript directly
 - Tests co-located with source in `lib/` and `api/badge/`
 - All endpoints support `?theme=dark|light` and `?cache=no` query params
-- badge, top-repos, recent support `?minStars=N` (default 50) to filter by repo star count
-- card and activity use the shared `createWidgetHandler` factory; badge, top-repos, recent are standalone handlers (they need star filtering)
+- top-repos, recent, badge support `?minStars=N` (default 50) to filter by repo star count
+- All SVG endpoints use the `createWidgetHandler` factory; recent and top-repos use its `transform` callback for star filtering. Badge is the only standalone handler (returns JSON, not SVG).
