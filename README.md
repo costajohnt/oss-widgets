@@ -141,7 +141,7 @@ lib/
 └── *.test.ts               # Co-located tests
 ```
 
-The card, recent, activity, and top-repos endpoints use the shared `createWidgetHandler` factory. The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
+All SVG endpoints use the shared `createWidgetHandler` factory. The recent and top-repos endpoints use the factory's `transform` callback for star-count filtering (`minStars`). The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
 
 ## License
 

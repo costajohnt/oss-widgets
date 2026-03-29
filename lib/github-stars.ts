@@ -26,7 +26,12 @@ export async function getStarsForRepos(
     const batch = repos.slice(i, i + batchSize);
     const results = await Promise.all(
       batch.map(async (repo) => {
-        const [owner, name] = repo.split('/');
+        const parts = repo.split('/');
+        if (parts.length !== 2 || !parts[0] || !parts[1]) {
+          console.warn(`[stars] Malformed repo name: ${repo}`);
+          return { repo, stars: 0 };
+        }
+        const [owner, name] = parts;
         try {
           return { repo, stars: await getRepoStars(octokit, owner, name) };
         } catch (err: unknown) {
@@ -34,6 +39,7 @@ export async function getStarsForRepos(
           if (status !== 404) {
             console.warn(`[stars] Failed to fetch stars for ${repo}:`, err instanceof Error ? err.message : String(err));
           }
+          // Private/deleted repos (404) or other errors — exclude from star count
           return { repo, stars: 0 };
         }
       }),

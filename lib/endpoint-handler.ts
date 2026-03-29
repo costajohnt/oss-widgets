@@ -24,6 +24,15 @@ export interface WidgetHandlerConfig {
   errorHeight: number;
   errorTextY: number;
   render: (data: ContributionData, mode: ThemeMode) => string;
+  /**
+   * Optional async transform applied to ContributionData before rendering.
+   * Use this for endpoints that need additional data fetching (e.g., star counts
+   * for minStars filtering). Receives the full query params for access to minStars, etc.
+   * The returned data replaces the original for rendering.
+   */
+  transform?: (data: ContributionData, query: Record<string, string | string[]>) => Promise<ContributionData> | ContributionData;
+  /** Extra query param keys to include in the cache key (e.g., ['minStars']). */
+  cacheKeyParams?: string[];
 }
 
 function makeErrorSvg(message: string, mode: ThemeMode, config: WidgetHandlerConfig): string {
@@ -36,7 +45,7 @@ function makeErrorSvg(message: string, mode: ThemeMode, config: WidgetHandlerCon
 }
 
 export function createWidgetHandler(config: WidgetHandlerConfig) {
-  const { prefix, render } = config;
+  const { prefix, render, transform, cacheKeyParams } = config;
   const cache = new Map<string, CacheEntry>();
 
   function errorSvg(message: string, mode: ThemeMode): string {
@@ -60,7 +69,14 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       return res.status(500).send(errorSvg('Server configuration error: missing GitHub token', mode));
     }
 
-    const cacheKey = `${prefix}:${username}:${mode}`;
+    // Build cache key including any extra query params (e.g., minStars)
+    let cacheKey = `${prefix}:${username}:${mode}`;
+    if (cacheKeyParams) {
+      for (const key of cacheKeyParams) {
+        const val = req.query[key];
+        if (typeof val === 'string') cacheKey += `:${key}=${val}`;
+      }
+    }
 
     if (!noCache) {
       const cached = cache.get(cacheKey);
@@ -69,7 +85,16 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       }
     }
 
-    const computation = fetchContributionData(username, process.env.GITHUB_TOKEN);
+    // Wrap fetch + optional transform as a single computation
+    const computation = (async (): Promise<ContributionResult> => {
+      const result = await fetchContributionData(username, process.env.GITHUB_TOKEN!);
+      if (result.error) return result;
+      if (transform) {
+        return await transform(result, req.query);
+      }
+      return result;
+    })();
+
     computation.catch((err) => {
       console.error(`[${prefix}] Post-timeout error for ${username}:`, err instanceof Error ? err.message : String(err));
     });
@@ -92,6 +117,7 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       const stale = cache.get(cacheKey);
       if (stale && Date.now() - stale.ts < STALE_TTL) {
         console.warn(`[${prefix}] Serving stale cache for ${username}: ${result.error}`);
+        res.setHeader('Cache-Control', 'no-cache, no-store');
         return res.status(200).send(stale.svg);
       }
 
