@@ -181,12 +181,12 @@ export async function fetchContributionData(username: string, token: string): Pr
       }
     }
 
-    // Derive top external repos (exclude user's own repos), sorted by PR count
+    // Derive all external repos (exclude user's own repos), sorted by PR count.
+    // Not sliced here — renderers and transforms handle their own display limits.
     const topRepos = [...repoCounts.entries()]
       .filter(([repo]) => repo.split('/')[0].toLowerCase() !== username.toLowerCase())
       .map(([repo, count]) => ({ repo, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .sort((a, b) => b.count - a.count);
 
     return {
       merged,
