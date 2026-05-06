@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createWidgetHandler } from './endpoint-handler.js';
 import type { ContributionData } from './github-data.js';
+import { _resetForTest as resetContributionCache } from './contribution-cache.js';
 
 // Hoist mock references so they're available inside vi.mock factory
 const { fetchMock } = vi.hoisted(() => {
@@ -77,6 +78,7 @@ describe('createWidgetHandler', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContributionCache();
     originalToken = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'fake-token';
     BASE_CONFIG.render.mockImplementation(() => '<svg>widget</svg>');

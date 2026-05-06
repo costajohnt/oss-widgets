@@ -1,10 +1,10 @@
 import {
-  fetchContributionData,
   isValidUsername,
   type ContributionData,
   type ContributionResult,
   type ThemeMode,
 } from './github-data.js';
+import { getContributionData } from './contribution-cache.js';
 import { escapeXml, theme as getTheme } from './svg-utils.js';
 import type { VercelRequest, VercelResponse } from './vercel-types.js';
 
@@ -89,7 +89,7 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
 
     // Wrap fetch + optional transform as a single computation
     const computation = (async (): Promise<ContributionResult> => {
-      const result = await fetchContributionData(username, process.env.GITHUB_TOKEN!);
+      const result = await getContributionData(username, process.env.GITHUB_TOKEN!, { force: noCache });
       if (result.error) return result;
       if (transform) {
         try {
