@@ -30,6 +30,7 @@ function makeData(overrides: Partial<ContributionData> = {}): ContributionData {
     dailyActivity: {},
     streak: 0,
     topRepos: [],
+    repoStars: {},
     ...overrides,
   };
 }

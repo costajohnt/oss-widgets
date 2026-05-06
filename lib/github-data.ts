@@ -32,6 +32,8 @@ export interface ContributionData {
   readonly streak: number;
   /** Top external repos by merged PR count (excludes user's own repos), sorted descending. */
   readonly topRepos: readonly { repo: string; count: number }[];
+  /** Star count per repo seen in merged PRs. Populated inline by the GraphQL fetch. */
+  readonly repoStars: Readonly<Record<string, number>>;
   readonly error?: undefined;
 }
 
@@ -87,36 +89,80 @@ export function computeStreak(dailyActivity: Record<string, number>): number {
   return streak;
 }
 
-async function paginateSearch(
+interface MergedPRItem {
+  number: number;
+  title: string;
+  url: string;
+  /** owner/repo */
+  repo: string;
+  mergedAt: string;
+  stargazerCount: number;
+}
+
+interface GraphQLSearchResponse {
+  search: {
+    issueCount: number;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: Array<{
+      number: number;
+      title: string;
+      url: string;
+      mergedAt: string;
+      repository: { nameWithOwner: string; stargazerCount: number };
+    }>;
+  };
+}
+
+const MERGED_PR_QUERY = `
+  query($q: String!, $after: String) {
+    search(query: $q, type: ISSUE, first: 100, after: $after) {
+      issueCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ... on PullRequest {
+          number
+          title
+          url
+          mergedAt
+          repository { nameWithOwner stargazerCount }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Paginate merged PRs via GraphQL search. Uses the 5000/hour GraphQL bucket
+ * instead of the 30/min REST search bucket, and gets star counts inline.
+ *
+ * GitHub's search results cap is still 1000 — paginate up to that.
+ */
+async function paginateMergedPRsGraphQL(
   octokit: InstanceType<typeof Octokit>,
   query: string,
   maxItems: number = 1000,
-): Promise<{ totalCount: number; items: Array<{ repository_url: string; number: number; title: string; html_url: string; closed_at: string | null; pull_request?: { merged_at?: string | null } }> }> {
-  const perPage = 100;
-  const firstPage = await octokit.rest.search.issuesAndPullRequests({
-    q: query,
-    sort: 'updated',
-    order: 'desc',
-    per_page: perPage,
-    page: 1,
-  });
+): Promise<{ totalCount: number; items: MergedPRItem[] }> {
+  const items: MergedPRItem[] = [];
+  let after: string | null = null;
+  let totalCount = 0;
 
-  const totalCount = firstPage.data.total_count;
-  const items = [...firstPage.data.items];
+  for (let page = 0; page < 10; page++) {
+    const res = (await octokit.graphql(MERGED_PR_QUERY, { q: query, after })) as GraphQLSearchResponse;
+    if (page === 0) totalCount = res.search.issueCount;
 
-  // GitHub Search API caps results at 1000 (10 pages × 100). Paginate up to that cap.
-  const effectiveCount = Math.min(totalCount, maxItems);
-  const totalPages = Math.min(Math.ceil(effectiveCount / perPage), 10);
+    for (const n of res.search.nodes) {
+      items.push({
+        number: n.number,
+        title: n.title,
+        url: n.url,
+        repo: n.repository.nameWithOwner,
+        mergedAt: n.mergedAt,
+        stargazerCount: n.repository.stargazerCount,
+      });
+    }
 
-  for (let page = 2; page <= totalPages; page++) {
-    const res = await octokit.rest.search.issuesAndPullRequests({
-      q: query,
-      sort: 'updated',
-      order: 'desc',
-      per_page: perPage,
-      page,
-    });
-    items.push(...res.data.items);
+    if (!res.search.pageInfo.hasNextPage || items.length >= maxItems) break;
+    after = res.search.pageInfo.endCursor;
   }
 
   return { totalCount, items };
@@ -127,10 +173,10 @@ export async function fetchContributionData(username: string, token: string): Pr
   const since = twelveMonthsAgo();
 
   try {
-    // Run merged pagination first (may make multiple requests), then open/closed concurrently
-    const mergedResult = await paginateSearch(octokit, `is:pr author:${username} is:merged merged:>=${since}`);
-
-    const [openRes, closedRes] = await Promise.all([
+    // Merged PRs via GraphQL (uses 5000/hour GraphQL bucket, not 30/min REST search bucket).
+    // Open/closed-unmerged counts via REST (1 search call each, fits in budget).
+    const [mergedResult, openRes, closedRes] = await Promise.all([
+      paginateMergedPRsGraphQL(octokit, `is:pr author:${username} is:merged merged:>=${since} sort:updated-desc`),
       octokit.rest.search.issuesAndPullRequests({
         q: `is:pr author:${username} is:open`,
         sort: 'updated',
@@ -152,34 +198,32 @@ export async function fetchContributionData(username: string, token: string): Pr
     const mergeRate = mergeTotal > 0 ? (merged / mergeTotal) * 100 : 0;
 
     const repoCounts = new Map<string, number>();
+    const repoStars: Record<string, number> = {};
     const dailyActivity: Record<string, number> = {};
     const recentPRs: RecentPR[] = [];
 
     for (const item of mergedResult.items) {
-      const repo = extractRepo(item.repository_url);
+      const repo = item.repo;
       repoCounts.set(repo, (repoCounts.get(repo) ?? 0) + 1);
+      repoStars[repo] = item.stargazerCount;
 
-      const mergedAt = item.pull_request?.merged_at ?? item.closed_at ?? '';
-      if (mergedAt) {
-        const day = mergedAt.slice(0, 10);
+      if (item.mergedAt) {
+        const day = item.mergedAt.slice(0, 10);
         dailyActivity[day] = (dailyActivity[day] ?? 0) + 1;
       }
 
-      // Only include external repos in recentPRs (exclude user's own repos)
       const isOwnRepo = repo.split('/')[0].toLowerCase() === username.toLowerCase();
       if (!isOwnRepo && recentPRs.length < 5) {
         recentPRs.push({
           number: item.number,
           title: item.title,
-          url: item.html_url,
+          url: item.url,
           repo,
-          mergedAt,
+          mergedAt: item.mergedAt,
         });
       }
     }
 
-    // Derive all external repos (exclude user's own repos), sorted by PR count.
-    // Not sliced here — renderers and transforms handle their own display limits.
     const topRepos = [...repoCounts.entries()]
       .filter(([repo]) => repo.split('/')[0].toLowerCase() !== username.toLowerCase())
       .map(([repo, count]) => ({ repo, count }))
@@ -197,6 +241,7 @@ export async function fetchContributionData(username: string, token: string): Pr
       dailyActivity,
       streak: computeStreak(dailyActivity),
       topRepos,
+      repoStars,
     };
   } catch (err: unknown) {
     const status = err instanceof Object && 'status' in err ? (err as { status: number }).status : undefined;

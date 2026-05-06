@@ -27,6 +27,7 @@ const sampleData: ContributionData = {
   },
   streak: 3,
   topRepos: [],
+  repoStars: {},
 };
 
 const emptyData: ContributionData = {
