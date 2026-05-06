@@ -14,6 +14,7 @@ const sampleData: ContributionData = {
   dailyActivity: { '2026-03-01': 2, '2026-03-08': 1, '2026-03-15': 3 },
   streak: 3,
   topRepos: [],
+  repoStars: {},
 };
 
 describe('renderStatsCard', () => {

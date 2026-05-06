@@ -20,6 +20,7 @@ const baseData: ContributionData = {
     { repo: 'Homebrew/brew', count: 6 },
     { repo: 'sindresorhus/eslint-plugin-unicorn', count: 6 },
   ],
+  repoStars: {},
 };
 
 describe('renderTopReposCard', () => {

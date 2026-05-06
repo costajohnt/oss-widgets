@@ -20,6 +20,7 @@ const okData = {
   dailyActivity: {},
   streak: 0,
   topRepos: [],
+  repoStars: {},
 };
 
 describe('getContributionData', () => {
