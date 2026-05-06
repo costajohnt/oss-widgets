@@ -74,10 +74,26 @@ describe('fetchContributionData', () => {
     ]);
   });
 
-  it('flags capped results when total_count exceeds 1000', async () => {
+  it('flags capped results when total_count exceeds 1000 and still paginates to the 1000-item cap', async () => {
+    // Page 1: 100 items in external repos
+    const page1Items = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `PR ${i + 1}`,
+      html_url: `https://github.com/external/popular/pull/${i + 1}`,
+      repository_url: 'https://api.github.com/repos/external/popular',
+      closed_at: '2026-03-01T00:00:00Z',
+      pull_request: { merged_at: '2026-03-01T00:00:00Z' },
+    }));
     searchMock.mockResolvedValueOnce({
-      data: { total_count: 1500, items: [] },
+      data: { total_count: 1500, items: page1Items },
     });
+    // Pages 2–10: empty (still must be requested, proving pagination continues past the cap guard)
+    for (let p = 2; p <= 10; p++) {
+      searchMock.mockResolvedValueOnce({
+        data: { total_count: 1500, items: [] },
+      });
+    }
+    // Open + closed-unmerged
     searchMock.mockResolvedValueOnce({ data: { total_count: 10, items: [] } });
     searchMock.mockResolvedValueOnce({ data: { total_count: 20, items: [] } });
 
@@ -87,6 +103,10 @@ describe('fetchContributionData', () => {
     if ('error' in result && result.error) throw new Error('unexpected error');
     expect(result.merged).toBe(1500);
     expect(result.cappedMerged).toBe(true);
+    // 10 merged pages + open + closed = 12 search calls. Pre-fix behavior stopped at 3.
+    expect(searchMock).toHaveBeenCalledTimes(12);
+    // topRepos must reflect the paginated items, not just page 1's snapshot
+    expect(result.topRepos).toEqual([{ repo: 'external/popular', count: 100 }]);
   });
 
   it('returns error state for non-existent user', async () => {

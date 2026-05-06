@@ -104,12 +104,9 @@ async function paginateSearch(
   const totalCount = firstPage.data.total_count;
   const items = [...firstPage.data.items];
 
-  // GitHub caps search results at 1000; if we're at or above that, don't paginate
-  if (totalCount >= maxItems) {
-    return { totalCount, items };
-  }
-
-  const totalPages = Math.min(Math.ceil(totalCount / perPage), 10);
+  // GitHub Search API caps results at 1000 (10 pages × 100). Paginate up to that cap.
+  const effectiveCount = Math.min(totalCount, maxItems);
+  const totalPages = Math.min(Math.ceil(effectiveCount / perPage), 10);
 
   for (let page = 2; page <= totalPages; page++) {
     const res = await octokit.rest.search.issuesAndPullRequests({
