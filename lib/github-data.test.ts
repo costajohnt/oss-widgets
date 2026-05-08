@@ -80,7 +80,7 @@ describe('fetchContributionData', () => {
         pull_request: { merged_at: '2026-02-15T00:00:00Z' },
       },
     ];
-    graphqlMock.mockResolvedValueOnce(gqlPage(items, 42, false, null, { 'org/repo': 100, 'org/repo2': 50 }));
+    graphqlMock.mockResolvedValueOnce(gqlPage(items, items.length, false, null, { 'org/repo': 100, 'org/repo2': 50 }));
     searchMock.mockResolvedValueOnce({ data: { total_count: 3, items: [] } });
     searchMock.mockResolvedValueOnce({ data: { total_count: 5, items: [] } });
 
@@ -88,10 +88,10 @@ describe('fetchContributionData', () => {
 
     expect(result.error).toBeUndefined();
     if ('error' in result && result.error) throw new Error('unexpected error');
-    expect(result.merged).toBe(42);
+    expect(result.merged).toBe(2);
     expect(result.open).toBe(3);
     expect(result.closedUnmerged).toBe(5);
-    expect(result.mergeRate).toBeCloseTo(89.4, 0);
+    expect(result.mergeRate).toBeCloseTo(28.6, 0);
     expect(result.repoCount).toBe(2);
     expect(result.recentPRs).toHaveLength(2);
     expect(result.recentPRs[0].title).toBe('Fix bug');
@@ -103,8 +103,8 @@ describe('fetchContributionData', () => {
     expect(result.repoStars).toEqual({ 'org/repo': 100, 'org/repo2': 50 });
   });
 
-  it('flags capped results when totalCount >= 1000 and paginates up to the cap', async () => {
-    const page1Items: RestLikeItem[] = Array.from({ length: 100 }, (_, i) => ({
+  it('flags capped results when items still fall short of totalCount after both passes', async () => {
+    const descItems: RestLikeItem[] = Array.from({ length: 100 }, (_, i) => ({
       number: i + 1,
       title: `PR ${i + 1}`,
       html_url: `https://github.com/external/popular/pull/${i + 1}`,
@@ -112,16 +112,22 @@ describe('fetchContributionData', () => {
       closed_at: '2026-03-01T00:00:00Z',
       pull_request: { merged_at: '2026-03-01T00:00:00Z' },
     }));
-    // Page 1: 100 items, hasNextPage true
+    const ascItems: RestLikeItem[] = Array.from({ length: 100 }, (_, i) => ({
+      number: 1000 + i,
+      title: `Old PR ${1000 + i}`,
+      html_url: `https://github.com/external/popular/pull/${1000 + i}`,
+      repository_url: 'https://api.github.com/repos/external/popular',
+      closed_at: '2025-06-01T00:00:00Z',
+      pull_request: { merged_at: '2025-06-01T00:00:00Z' },
+    }));
+    // First pass (sort:updated-desc): 100 items, hasNextPage=false (simulated cap).
     graphqlMock.mockResolvedValueOnce(
-      gqlPage(page1Items, 1500, true, 'cursor1', { 'external/popular': 800 }),
+      gqlPage(descItems, 2500, false, null, { 'external/popular': 800 }),
     );
-    // Pages 2..9: empty, hasNextPage true (still requested while items < cap)
-    for (let p = 2; p <= 9; p++) {
-      graphqlMock.mockResolvedValueOnce(gqlPage([], 1500, true, `cursor${p}`));
-    }
-    // Page 10: empty, hasNextPage true (loop exits at page === 10)
-    graphqlMock.mockResolvedValueOnce(gqlPage([], 1500, true, 'cursor10'));
+    // Second pass (sort:updated-asc): 100 different items, hasNextPage=false (simulated cap).
+    graphqlMock.mockResolvedValueOnce(
+      gqlPage(ascItems, 2500, false, null, { 'external/popular': 800 }),
+    );
     // Open + closed-unmerged via REST search
     searchMock.mockResolvedValueOnce({ data: { total_count: 10, items: [] } });
     searchMock.mockResolvedValueOnce({ data: { total_count: 20, items: [] } });
@@ -130,13 +136,71 @@ describe('fetchContributionData', () => {
 
     expect(result.error).toBeUndefined();
     if ('error' in result && result.error) throw new Error('unexpected error');
-    expect(result.merged).toBe(1500);
+    expect(result.merged).toBe(2500);
+    // 200 unique items < 2500 totalCount → capped
     expect(result.cappedMerged).toBe(true);
-    // 10 GraphQL pages for merged + 2 REST searches for open/closed
-    expect(graphqlMock).toHaveBeenCalledTimes(10);
+    expect(graphqlMock).toHaveBeenCalledTimes(2);
     expect(searchMock).toHaveBeenCalledTimes(2);
-    expect(result.topRepos).toEqual([{ repo: 'external/popular', count: 100 }]);
+    expect(result.topRepos).toEqual([{ repo: 'external/popular', count: 200 }]);
     expect(result.repoStars).toEqual({ 'external/popular': 800 });
+  });
+
+  it('runs a second pass with sort:updated-asc when first pass items < totalCount and dedupes by url', async () => {
+    // Simulates a user with 150 merged PRs where GitHub's first-pass cap drops 50.
+    // First pass returns PRs 1-100 (most recently updated).
+    const firstPass: RestLikeItem[] = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `PR ${i + 1}`,
+      html_url: `https://github.com/external/lib/pull/${i + 1}`,
+      repository_url: 'https://api.github.com/repos/external/lib',
+      closed_at: '2026-04-01T00:00:00Z',
+      pull_request: { merged_at: '2026-04-01T00:00:00Z' },
+    }));
+    // Second pass returns PRs 51-150 (oldest-updated first); 50 overlap with first.
+    const secondPass: RestLikeItem[] = Array.from({ length: 100 }, (_, i) => ({
+      number: 51 + i,
+      title: `PR ${51 + i}`,
+      html_url: `https://github.com/external/lib/pull/${51 + i}`,
+      repository_url: 'https://api.github.com/repos/external/lib',
+      closed_at: '2025-08-01T00:00:00Z',
+      pull_request: { merged_at: '2025-08-01T00:00:00Z' },
+    }));
+    graphqlMock.mockResolvedValueOnce(gqlPage(firstPass, 150, false, null, { 'external/lib': 500 }));
+    graphqlMock.mockResolvedValueOnce(gqlPage(secondPass, 150, false, null, { 'external/lib': 500 }));
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+
+    const result = await fetchContributionData('user', 'fake-token');
+
+    expect(result.error).toBeUndefined();
+    if ('error' in result && result.error) throw new Error('unexpected error');
+    expect(result.merged).toBe(150);
+    expect(result.cappedMerged).toBe(false);
+    expect(graphqlMock).toHaveBeenCalledTimes(2);
+    // 200 raw items dedupe to 150 unique by URL
+    expect(result.topRepos).toEqual([{ repo: 'external/lib', count: 150 }]);
+  });
+
+  it('skips the second pass when first-pass items already cover totalCount', async () => {
+    const items: RestLikeItem[] = Array.from({ length: 5 }, (_, i) => ({
+      number: i + 1,
+      title: `PR ${i + 1}`,
+      html_url: `https://github.com/external/lib/pull/${i + 1}`,
+      repository_url: 'https://api.github.com/repos/external/lib',
+      closed_at: '2026-03-01T00:00:00Z',
+      pull_request: { merged_at: '2026-03-01T00:00:00Z' },
+    }));
+    graphqlMock.mockResolvedValueOnce(gqlPage(items, 5, false, null, { 'external/lib': 100 }));
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+
+    const result = await fetchContributionData('user', 'fake-token');
+
+    expect(result.error).toBeUndefined();
+    if ('error' in result && result.error) throw new Error('unexpected error');
+    expect(graphqlMock).toHaveBeenCalledTimes(1);
+    expect(result.merged).toBe(5);
+    expect(result.cappedMerged).toBe(false);
   });
 
   it('stops paginating when GraphQL reports hasNextPage=false', async () => {

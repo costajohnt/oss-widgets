@@ -131,13 +131,7 @@ const MERGED_PR_QUERY = `
   }
 `;
 
-/**
- * Paginate merged PRs via GraphQL search. Uses the 5000/hour GraphQL bucket
- * instead of the 30/min REST search bucket, and gets star counts inline.
- *
- * GitHub's search results cap is still 1000 — paginate up to that.
- */
-async function paginateMergedPRsGraphQL(
+async function pageMergedPRs(
   octokit: InstanceType<typeof Octokit>,
   query: string,
   maxItems: number = 1000,
@@ -168,6 +162,34 @@ async function paginateMergedPRsGraphQL(
   return { totalCount, items };
 }
 
+/**
+ * Paginate merged PRs via GraphQL with a two-pass union to defeat GitHub's
+ * 1000-result Search cap. First pass sorts updated-desc; if items don't cover
+ * totalCount, a second pass with updated-asc fetches the oldest-updated PRs
+ * that fell off the cap. Results are deduped by URL. Effective ceiling: ~2000.
+ */
+async function paginateMergedPRsGraphQL(
+  octokit: InstanceType<typeof Octokit>,
+  baseQuery: string,
+): Promise<{ totalCount: number; items: MergedPRItem[]; capped: boolean }> {
+  const first = await pageMergedPRs(octokit, `${baseQuery} sort:updated-desc`);
+  if (first.items.length >= first.totalCount) {
+    return { totalCount: first.totalCount, items: first.items, capped: false };
+  }
+
+  const second = await pageMergedPRs(octokit, `${baseQuery} sort:updated-asc`);
+  const seen = new Map<string, MergedPRItem>();
+  for (const it of first.items) seen.set(it.url, it);
+  for (const it of second.items) seen.set(it.url, it);
+  const items = [...seen.values()];
+
+  return {
+    totalCount: first.totalCount,
+    items,
+    capped: items.length < first.totalCount,
+  };
+}
+
 export async function fetchContributionData(username: string, token: string): Promise<ContributionResult> {
   const octokit = new Octokit({ auth: token });
   const since = twelveMonthsAgo();
@@ -176,7 +198,7 @@ export async function fetchContributionData(username: string, token: string): Pr
     // Merged PRs via GraphQL (uses 5000/hour GraphQL bucket, not 30/min REST search bucket).
     // Open/closed-unmerged counts via REST (1 search call each, fits in budget).
     const [mergedResult, openRes, closedRes] = await Promise.all([
-      paginateMergedPRsGraphQL(octokit, `is:pr author:${username} is:merged merged:>=${since} sort:updated-desc`),
+      paginateMergedPRsGraphQL(octokit, `is:pr author:${username} is:merged merged:>=${since}`),
       octokit.rest.search.issuesAndPullRequests({
         q: `is:pr author:${username} is:open`,
         sort: 'updated',
@@ -236,7 +258,7 @@ export async function fetchContributionData(username: string, token: string): Pr
       mergeRate,
       repoCount: repoCounts.size,
       recentPRs,
-      cappedMerged: merged >= 1000,
+      cappedMerged: mergedResult.capped,
       cappedClosedUnmerged: closedUnmerged >= 1000,
       dailyActivity,
       streak: computeStreak(dailyActivity),
