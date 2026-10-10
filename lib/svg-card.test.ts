@@ -39,6 +39,11 @@ describe('renderStatsCard', () => {
     const svg = renderStatsCard(capped, 'light');
     expect(svg).toContain('1500+');
   });
+  it('marks the merge rate approximate when counts are capped (#12)', () => {
+    expect(renderStatsCard({ ...sampleData, cappedMerged: true }, 'light')).toContain('~84%');
+    expect(renderStatsCard({ ...sampleData, cappedClosedUnmerged: true }, 'light')).toContain('~84%');
+    expect(renderStatsCard(sampleData, 'light')).not.toContain('~84%');
+  });
   it('renders dark theme', () => {
     const svg = renderStatsCard(sampleData, 'dark');
     expect(svg).toContain('#0d1117');

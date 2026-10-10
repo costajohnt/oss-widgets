@@ -131,4 +131,25 @@ describe('card endpoint', () => {
     expect(rendered.repoCount).toBe(1);
     expect(rendered.dailyActivity).toEqual({ '2026-03-03': 1, '2026-03-01': 2 });
   });
+
+  it('passes the source cap flags through so a truncated count renders as N+ (#12)', async () => {
+    fetchMock.mockResolvedValue(
+      baseData({
+        topRepos: [{ repo: 'big/repo', count: 3 }],
+        externalMergedPRs: [pr(1, 'big/repo', '2026-03-03T00:00:00Z')],
+        externalClosedUnmergedByRepo: { 'big/repo': 1 },
+        repoStars: { 'big/repo': 500 },
+        cappedMerged: true,
+        cappedClosedUnmerged: true,
+      }),
+    );
+
+    const res = makeRes();
+    await cardHandler({ query: { username: 'capped-user' } } as any, res);
+
+    expect(res._status).toBe(200);
+    const rendered = renderCard.mock.calls[0][0] as ContributionData;
+    expect(rendered.cappedMerged).toBe(true);
+    expect(rendered.cappedClosedUnmerged).toBe(true);
+  });
 });

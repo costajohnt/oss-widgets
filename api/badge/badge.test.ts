@@ -543,6 +543,35 @@ describe('badge response format', () => {
     expect(result.color).toBe('brightgreen');
     expect(result.message).toBe('80% merge rate | 8 merged | 1 open');
   });
+
+  it('marks merged as a lower bound and the rate as approximate when the fetch was capped (#12)', async () => {
+    const repo = 'owner/big-repo';
+    const merged = Array.from({ length: 8 }, () => makePR(repo));
+    const closed = Array.from({ length: 2 }, () => makePR(repo));
+    fetchMock.mockImplementation(async () => ({
+      ...buildData(merged, closed, [], 500),
+      cappedMerged: true,
+      cappedClosedUnmerged: true,
+    }));
+
+    const result = (await computeBadge('prolific', 50)) as BadgeResponse;
+
+    expect(result.message).toBe('~80% merge rate | 8+ merged | 0 open');
+  });
+
+  it('marks only the rate as approximate when just closed-unmerged was capped (#12)', async () => {
+    const repo = 'owner/big-repo';
+    const merged = Array.from({ length: 8 }, () => makePR(repo));
+    const closed = Array.from({ length: 2 }, () => makePR(repo));
+    fetchMock.mockImplementation(async () => ({
+      ...buildData(merged, closed, [], 500),
+      cappedClosedUnmerged: true,
+    }));
+
+    const result = (await computeBadge('prolific', 50)) as BadgeResponse;
+
+    expect(result.message).toBe('~80% merge rate | 8 merged | 0 open');
+  });
 });
 
 // ===========================================================================

@@ -37,7 +37,7 @@ Live SVG widgets for GitHub contribution stats. Embed auto-updating stats in you
 
 ### Stats Card
 
-Shows merged PR count, merge rate, repo count, current streak, and a 12-week sparkline. Every number counts only PRs to external repos with 50+ stars by default (`minStars`), the same population as the badge.
+Shows merged PR count, merge rate, repo count, current streak, and a 12-week sparkline. Every number counts only PRs to external repos with 50+ stars by default (`minStars`), the same population as the badge. For very active accounts that exceed GitHub's search result caps, the merged count is shown as a lower bound (`N+`) and the merge rate as an estimate (`~N%`).
 
 ```markdown
 [![OSS Contributions](https://oss-widgets.vercel.app/api/card/YOUR_USERNAME)](https://github.com/YOUR_USERNAME)
@@ -73,7 +73,7 @@ Shows a 26-week contribution heatmap with intensity-based coloring.
 ![OSS Contributions](https://img.shields.io/endpoint?url=https://oss-widgets.vercel.app/api/badge/YOUR_USERNAME)
 ```
 
-The badge shows merge rate, merged count, and open PR count. Only counts PRs to external repos with 50+ stars by default.
+The badge shows merge rate, merged count, and open PR count. Only counts PRs to external repos with 50+ stars by default. Capped counts use the same `N+` / `~N%` notation as the card.
 
 ## Options
 
