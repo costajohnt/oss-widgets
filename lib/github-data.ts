@@ -187,7 +187,8 @@ interface GraphQLRepoCountResponse {
   search: {
     issueCount: number;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
-    nodes: Array<{ repository: { nameWithOwner: string; stargazerCount: number } }>;
+    // Search nodes are nullable (e.g. items the token cannot resolve).
+    nodes: Array<{ repository?: { nameWithOwner: string; stargazerCount: number } | null } | null>;
   };
 }
 
@@ -211,7 +212,7 @@ async function countPRsByRepo(
     if (page === 0) totalCount = res.search.issueCount;
 
     for (const n of res.search.nodes) {
-      if (!n.repository) continue;
+      if (!n?.repository) continue;
       const repo = n.repository.nameWithOwner;
       byRepo.set(repo, (byRepo.get(repo) ?? 0) + 1);
       stars.set(repo, n.repository.stargazerCount);

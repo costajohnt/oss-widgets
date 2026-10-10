@@ -386,6 +386,20 @@ describe('fetchContributionData: recent PRs and per-repo open/closed counts', ()
     expect(searchMock).not.toHaveBeenCalled();
   });
 
+  it('skips null search nodes in repo-count queries instead of failing the whole fetch', async () => {
+    graphqlMock.mockResolvedValueOnce(gqlPage([], 0));
+    openMock.mockReset();
+    const page = countPage(2, { 'ext/a': 1 }, { 'ext/a': 80 });
+    (page.search.nodes as unknown[]).push(null);
+    openMock.mockResolvedValueOnce(page);
+
+    const result = await fetchContributionData('me', 'fake-token');
+    if ('error' in result && result.error) throw new Error(`unexpected error: ${result.error}`);
+
+    expect(result.externalOpenByRepo).toEqual({ 'ext/a': 1 });
+    expect(result.open).toBe(2);
+  });
+
   it('paginates repo-count queries and flags closed-unmerged as capped when results fall short', async () => {
     graphqlMock.mockResolvedValueOnce(gqlPage([], 0));
     closedMock.mockReset();

@@ -115,7 +115,7 @@ Deploy your own instance to Vercel:
 
 ```bash
 pnpm install       # Install dependencies
-pnpm test          # Run all tests (126 tests across 12 files)
+pnpm test          # Run all tests (127 tests across 12 files)
 pnpm run typecheck # TypeScript check
 vercel dev         # Local dev server
 ```
