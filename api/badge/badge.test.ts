@@ -7,31 +7,20 @@ import handler, {
   badgeCache,
   type BadgeResponse,
 } from './[username].js';
-import { clearStarCache } from '../../lib/github-stars.js';
+import { _resetForTest as resetContributionCache } from '../../lib/contribution-cache.js';
+import type { ContributionData, ContributionResult } from '../../lib/github-data.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-// Hoist mock references so they're available inside vi.mock factory
-const { octokitMocks } = vi.hoisted(() => {
-  const searchFn = vi.fn();
-  const reposGetFn = vi.fn();
-  return {
-    octokitMocks: {
-      search: { issuesAndPullRequests: searchFn },
-      repos: { get: reposGetFn },
-    },
-  };
-});
+// The badge reads the shared contribution data; mock the fetch beneath the
+// shared cache so the cache itself is exercised.
+const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
-vi.mock('@octokit/rest', () => {
-  // Must use a function (not arrow) so it's callable with `new`
-  return {
-    Octokit: vi.fn(function () {
-      return octokitMocks;
-    }),
-  };
+vi.mock('../../lib/github-data.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/github-data.js')>();
+  return { ...actual, fetchContributionData: fetchMock };
 });
 
 // ---------------------------------------------------------------------------
@@ -71,28 +60,76 @@ function makeRes() {
 
 /** Build a fake PR item pointing at a repo. */
 function makePR(repoFullName: string) {
-  return { repository_url: `https://api.github.com/repos/${repoFullName}` };
+  return { repo: repoFullName };
+}
+
+let pending: { merged: { repo: string }[]; closed: { repo: string }[]; open: { repo: string }[] } = {
+  merged: [],
+  closed: [],
+  open: [],
+};
+let starsForAll = 0;
+
+function countByRepo(items: { repo: string }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const { repo } of items) out[repo] = (out[repo] ?? 0) + 1;
+  return out;
+}
+
+/** Build ContributionData for external PRs; every repo gets `stars` stars. */
+function buildData(
+  merged: { repo: string }[],
+  closed: { repo: string }[],
+  open: { repo: string }[],
+  stars: number,
+): ContributionData {
+  const mergedByRepo = countByRepo(merged);
+  const repoStars: Record<string, number> = {};
+  for (const { repo } of [...merged, ...closed, ...open]) repoStars[repo] = stars;
+  const total = merged.length + closed.length;
+  return {
+    merged: merged.length,
+    open: open.length,
+    closedUnmerged: closed.length,
+    mergeRate: total > 0 ? (merged.length / total) * 100 : 0,
+    repoCount: Object.keys(mergedByRepo).length,
+    recentPRs: [],
+    externalMergedPRs: merged.map((pr, i) => ({
+      number: i + 1,
+      title: `PR ${i + 1}`,
+      url: `https://github.com/${pr.repo}/pull/${i + 1}`,
+      repo: pr.repo,
+      mergedAt: '2026-03-01T00:00:00Z',
+    })),
+    externalClosedUnmergedByRepo: countByRepo(closed),
+    externalOpenByRepo: countByRepo(open),
+    cappedMerged: false,
+    cappedClosedUnmerged: false,
+    dailyActivity: {},
+    streak: 0,
+    topRepos: Object.entries(mergedByRepo)
+      .map(([repo, count]) => ({ repo, count }))
+      .sort((x, y) => y.count - x.count),
+    repoStars,
+  };
 }
 
 /**
- * Configure the Octokit search mock to return specific PR counts.
- * The three calls correspond to: merged, closedUnmerged, open.
+ * Configure the contribution fetch to return these external merged,
+ * closed-unmerged and open PRs (built at fetch time with the current stars).
  */
-function mockSearchResults(
-  merged: { repository_url: string }[],
-  closed: { repository_url: string }[],
-  open: { repository_url: string }[],
-) {
-  const searchFn = octokitMocks.search.issuesAndPullRequests;
-  // Each search call returns all items in one page
-  searchFn.mockResolvedValueOnce({ data: { total_count: merged.length, items: merged } });
-  searchFn.mockResolvedValueOnce({ data: { total_count: closed.length, items: closed } });
-  searchFn.mockResolvedValueOnce({ data: { total_count: open.length, items: open } });
+function mockSearchResults(merged: { repo: string }[], closed: { repo: string }[], open: { repo: string }[]) {
+  pending = { merged, closed, open };
 }
 
-/** Configure repos.get to return a given star count for any repo. */
+/** Star count applied to every repo in the mocked data. */
 function mockRepoStars(stars: number) {
-  octokitMocks.repos.get.mockResolvedValue({ data: { stargazers_count: stars } });
+  starsForAll = stars;
+}
+
+/** Make the contribution fetch fail with the given error kind. */
+function mockFetchError(error: Exclude<ContributionResult['error'], undefined>) {
+  fetchMock.mockImplementation(async () => ({ error }));
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +141,10 @@ let originalToken: string | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
   badgeCache.clear();
-  clearStarCache();
+  resetContributionCache();
+  pending = { merged: [], closed: [], open: [] };
+  starsForAll = 0;
+  fetchMock.mockImplementation(async () => buildData(pending.merged, pending.closed, pending.open, starsForAll));
   originalToken = process.env.GITHUB_TOKEN;
   process.env.GITHUB_TOKEN = 'fake-token';
 });
@@ -240,7 +280,7 @@ describe('computeBadge — missing GITHUB_TOKEN', () => {
   it('returns server config error badge when GITHUB_TOKEN is not set', async () => {
     delete process.env.GITHUB_TOKEN;
 
-    const result = await computeBadge('testuser', 50);
+    const result = (await computeBadge('testuser', 50)) as BadgeResponse;
     expect(result).toEqual(errorBadge('server config error'));
   });
 
@@ -267,33 +307,41 @@ describe('handler — badge caching', () => {
     const res1 = makeRes();
     await handler(makeReq({ username: 'testuser' }), res1);
     expect(res1._status).toBe(200);
-    expect(octokitMocks.search.issuesAndPullRequests).toHaveBeenCalledTimes(3); // 3 search queries
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // Second call — should hit cache, no new API calls
+    // Second call — should hit cache, no new fetch
     const res2 = makeRes();
     await handler(makeReq({ username: 'testuser' }), res2);
     expect(res2._status).toBe(200);
     expect(res2._body).toEqual(res1._body);
-    // Still only 3 calls total (no new ones)
-    expect(octokitMocks.search.issuesAndPullRequests).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not use cache from a different minStars key', async () => {
+  it('computes a separate badge per minStars from one shared contribution fetch', async () => {
     mockSearchResults([makePR('owner/repo')], [], []);
-    mockRepoStars(100);
+    mockRepoStars(15);
 
     const res1 = makeRes();
     await handler(makeReq({ username: 'testuser', minStars: '10' }), res1);
-    expect(octokitMocks.search.issuesAndPullRequests).toHaveBeenCalledTimes(3);
+    const res2 = makeRes();
+    await handler(makeReq({ username: 'testuser', minStars: '20' }), res2);
 
-    // Different minStars — cache key differs
+    expect((res1._body as BadgeResponse).message).toContain('1 merged');
+    expect((res2._body as BadgeResponse).message).toBe('Getting Started');
+    // Different badge cache keys, but the contribution data is shared.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(badgeCache.size).toBe(2);
+  });
+
+  it('normalizes minStars in the cache key so equivalent values share an entry', async () => {
     mockSearchResults([makePR('owner/repo')], [], []);
     mockRepoStars(100);
 
-    const res2 = makeRes();
-    await handler(makeReq({ username: 'testuser', minStars: '20' }), res2);
-    // Should have made 3 more search calls (6 total)
-    expect(octokitMocks.search.issuesAndPullRequests).toHaveBeenCalledTimes(6);
+    for (const minStars of ['1', '01', '1x']) {
+      await handler(makeReq({ username: 'testuser', minStars }), makeRes());
+    }
+
+    expect([...badgeCache.keys()]).toEqual(['testuser:1']);
   });
 });
 
@@ -317,8 +365,8 @@ describe('handler — stale fallback', () => {
     const realNow = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(realNow + BADGE_CACHE_TTL + 5000);
 
-    // Now make the search throw an error
-    octokitMocks.search.issuesAndPullRequests.mockRejectedValue(new Error('API failure'));
+    // Now make the fetch fail
+    mockFetchError('api_error');
 
     const res2 = makeRes();
     await handler(makeReq({ username: 'testuser' }), res2);
@@ -329,7 +377,7 @@ describe('handler — stale fallback', () => {
   });
 
   it('returns "temporarily unavailable" when no stale cache exists and computation fails', async () => {
-    octokitMocks.search.issuesAndPullRequests.mockRejectedValue(new Error('API failure'));
+    mockFetchError('api_error');
 
     const res = makeRes();
     await handler(makeReq({ username: 'testuser' }), res);
@@ -338,9 +386,8 @@ describe('handler — stale fallback', () => {
     expect(res._body).toEqual(errorBadge('temporarily unavailable'));
   });
 
-  it('returns "user not found" for 422 errors', async () => {
-    const error = Object.assign(new Error('Validation Failed'), { status: 422 });
-    octokitMocks.search.issuesAndPullRequests.mockRejectedValue(error);
+  it('returns "user not found" when the user does not exist', async () => {
+    mockFetchError('user_not_found');
 
     const res = makeRes();
     await handler(makeReq({ username: 'testuser' }), res);
@@ -349,75 +396,64 @@ describe('handler — stale fallback', () => {
     expect(res._body).toEqual(errorBadge('user not found'));
   });
 
-  it('returns stale fallback for 403 rate limit errors', async () => {
-    const error = Object.assign(new Error('rate limited'), { status: 403 });
-    octokitMocks.search.issuesAndPullRequests.mockRejectedValue(error);
+  it('returns stale fallback for rate limit errors', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockFetchError('rate_limited');
 
     const res = makeRes();
     await handler(makeReq({ username: 'testuser' }), res);
 
     expect(res._status).toBe(200);
+    expect(res._body).toEqual(errorBadge('temporarily unavailable'));
     expect(res._headers['Cache-Control']).toBe('no-cache, no-store');
   });
 
-  it('returns stale fallback for 429 rate limit errors', async () => {
-    const error = Object.assign(new Error('rate limited'), { status: 429 });
-    octokitMocks.search.issuesAndPullRequests.mockRejectedValue(error);
+  it('does not cache error results', async () => {
+    mockFetchError('api_error');
 
-    const res = makeRes();
-    await handler(makeReq({ username: 'testuser' }), res);
+    await handler(makeReq({ username: 'testuser' }), makeRes());
 
-    expect(res._status).toBe(200);
-    expect(res._headers['Cache-Control']).toBe('no-cache, no-store');
+    expect(badgeCache.size).toBe(0);
   });
 });
 
 // ===========================================================================
-// 9. getRepoStars logs warning on non-404 errors
+// 9. Shared data source and filtering
 // ===========================================================================
-describe('getRepoStars — error handling', () => {
-  it('logs a console.warn for non-404 errors during star fetch in computeBadge', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+describe('computeBadge — shared contribution data', () => {
+  it('reads the shared contribution data instead of making its own GitHub calls', async () => {
+    mockSearchResults([makePR('owner/repo')], [], []);
+    mockRepoStars(100);
 
-    // Return one merged PR
-    mockSearchResults([makePR('owner/failing-repo')], [], []);
+    await computeBadge('testuser', 50);
+    await computeBadge('testuser', 0);
 
-    // Make repos.get throw a 500 (non-404) error
-    const error = Object.assign(new Error('Internal Server Error'), { status: 500 });
-    octokitMocks.repos.get.mockRejectedValue(error);
-
-    const res = makeRes();
-    await handler(makeReq({ username: 'testuser', minStars: '0' }), res);
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[stars] Failed to fetch stars for owner/failing-repo:'),
-      expect.stringContaining('Internal Server Error'),
-    );
-
-    warnSpy.mockRestore();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('testuser', 'fake-token');
   });
 
-  it('silently returns 0 stars for 404 errors (private/deleted repos)', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('filters merged, closed and open by repo stars independently', async () => {
+    // Merged: 3 in a big repo; closed: 1 big + 5 tiny; open: 2 tiny.
+    fetchMock.mockImplementation(async () => {
+      const data = buildData(
+        [makePR('big/repo'), makePR('big/repo'), makePR('big/repo')],
+        [makePR('big/repo'), ...Array.from({ length: 5 }, () => makePR('tiny/repo'))],
+        [makePR('tiny/repo'), makePR('tiny/repo')],
+        0,
+      );
+      return { ...data, repoStars: { 'big/repo': 500, 'tiny/repo': 3 } };
+    });
 
-    mockSearchResults([makePR('owner/deleted-repo')], [], []);
+    const result = (await computeBadge('testuser', 50)) as BadgeResponse;
 
-    const error = Object.assign(new Error('Not Found'), { status: 404 });
-    octokitMocks.repos.get.mockRejectedValue(error);
-
-    const res = makeRes();
-    await handler(makeReq({ username: 'testuser', minStars: '0' }), res);
-
-    // Should NOT have logged a warning for 404
-    const badgeLogs = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('[stars] Failed to fetch stars'),
-    );
-    expect(badgeLogs).toHaveLength(0);
-
-    warnSpy.mockRestore();
+    // 3 merged / (3 + 1 closed) = 75%; tiny-repo closed and open PRs excluded.
+    expect(result).toEqual({
+      schemaVersion: 1,
+      label: 'OSS Contributions',
+      message: '75% merge rate | 3 merged | 0 open',
+      color: 'green',
+    });
   });
-
-  // Star cache behavior is tested in lib/github-stars.test.ts
 });
 
 // ===========================================================================
@@ -428,7 +464,7 @@ describe('computeBadge — Getting Started state', () => {
     // All three searches return empty
     mockSearchResults([], [], []);
 
-    const result = await computeBadge('newuser', 50);
+    const result = (await computeBadge('newuser', 50)) as BadgeResponse;
 
     expect(result).toEqual({
       schemaVersion: 1,
@@ -442,7 +478,7 @@ describe('computeBadge — Getting Started state', () => {
     mockSearchResults([makePR('owner/tiny-repo')], [], []);
     mockRepoStars(5); // 5 < 50
 
-    const result = await computeBadge('testuser', 50);
+    const result = (await computeBadge('testuser', 50)) as BadgeResponse;
 
     expect(result).toEqual({
       schemaVersion: 1,
@@ -456,7 +492,7 @@ describe('computeBadge — Getting Started state', () => {
     mockSearchResults([], [makePR('owner/repo')], []);
     mockRepoStars(100);
 
-    const result = await computeBadge('testuser', 50);
+    const result = (await computeBadge('testuser', 50)) as BadgeResponse;
 
     // mergedCount=0, openCount=0 → Getting Started
     expect(result.message).toBe('Getting Started');
@@ -501,7 +537,7 @@ describe('badge response format', () => {
     mockSearchResults(merged, closed, open);
     mockRepoStars(500);
 
-    const result = await computeBadge('prolific', 50);
+    const result = (await computeBadge('prolific', 50)) as BadgeResponse;
 
     // mergeRate = 8/(8+2) = 0.8 → brightgreen
     expect(result.color).toBe('brightgreen');

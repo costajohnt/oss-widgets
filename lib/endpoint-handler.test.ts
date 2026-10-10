@@ -31,6 +31,9 @@ function makeData(overrides: Partial<ContributionData> = {}): ContributionData {
     streak: 0,
     topRepos: [],
     repoStars: {},
+    externalMergedPRs: [],
+    externalClosedUnmergedByRepo: {},
+    externalOpenByRepo: {},
     ...overrides,
   };
 }
@@ -86,6 +89,7 @@ describe('createWidgetHandler', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (originalToken === undefined) {
       delete process.env.GITHUB_TOKEN;
     } else {
@@ -151,19 +155,54 @@ describe('createWidgetHandler', () => {
     expect(res2._body).toBe(res1._body);
   });
 
-  it('bypasses cache when cache=no is set', async () => {
+  it('cache=no does not refetch while the shared data is younger than the force window', async () => {
     fetchMock.mockResolvedValue(makeData());
     const handler = createWidgetHandler(BASE_CONFIG);
 
-    const res1 = makeRes();
-    await handler(makeReq({ username: 'costajohnt' }), res1);
+    await handler(makeReq({ username: 'costajohnt' }), makeRes());
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Repeated forced requests from any visitor cannot spend the token.
+    for (let i = 0; i < 5; i++) {
+      const res = makeRes();
+      await handler(makeReq({ username: 'costajohnt', cache: 'no' }), res);
+      expect(res._status).toBe(200);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cache=no refetches once the shared data is older than the force window', async () => {
+    fetchMock.mockResolvedValue(makeData());
+    const handler = createWidgetHandler(BASE_CONFIG);
+
+    await handler(makeReq({ username: 'costajohnt' }), makeRes());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const realNow = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 5 * 60 * 1000 + 1);
 
     const res2 = makeRes();
     await handler(makeReq({ username: 'costajohnt', cache: 'no' }), res2);
-    // Cache bypassed — should fetch again
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(res2._status).toBe(200);
+  });
+
+  it('builds the cache key from cacheKeySuffix so equivalent params share an entry', async () => {
+    fetchMock.mockResolvedValue(makeData());
+    const transform = vi.fn((data: ContributionData) => data);
+    const handler = createWidgetHandler({
+      ...BASE_CONFIG,
+      transform,
+      cacheKeySuffix: (query) => `n=${parseInt(String(query.n), 10)}`,
+    });
+
+    await handler(makeReq({ username: 'costajohnt', n: '1' }), makeRes());
+    await handler(makeReq({ username: 'costajohnt', n: '01' }), makeRes());
+    await handler(makeReq({ username: 'costajohnt', n: '1x' }), makeRes());
+    expect(transform).toHaveBeenCalledTimes(1);
+
+    await handler(makeReq({ username: 'costajohnt', n: '2' }), makeRes());
+    expect(transform).toHaveBeenCalledTimes(2);
   });
 
   it('returns 404 for user_not_found error', async () => {

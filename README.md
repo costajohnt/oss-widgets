@@ -37,7 +37,7 @@ Live SVG widgets for GitHub contribution stats. Embed auto-updating stats in you
 
 ### Stats Card
 
-Shows merged PR count, merge rate, repo count, current streak, and a 12-week sparkline.
+Shows merged PR count, merge rate, repo count, current streak, and a 12-week sparkline. Every number counts only PRs to external repos with 50+ stars by default (`minStars`), the same population as the badge.
 
 ```markdown
 [![OSS Contributions](https://oss-widgets.vercel.app/api/card/YOUR_USERNAME)](https://github.com/YOUR_USERNAME)
@@ -53,7 +53,7 @@ Shows your top 8 external repos (excluding your own) sorted by merged PR count i
 
 ### Recent Contributions
 
-Shows your five most recently merged PRs with repo name and time-ago.
+Shows your five most recently merged PRs to external repos with 50+ stars by default (`minStars`), with repo name and time-ago.
 
 ```markdown
 ![Recent](https://oss-widgets.vercel.app/api/recent/YOUR_USERNAME)
@@ -80,8 +80,8 @@ The badge shows merge rate, merged count, and open PR count. Only counts PRs to 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
 | `theme` | `light` (default), `dark` | Color scheme (card, recent, activity, top-repos) |
-| `cache` | `no` | Bypass the 1-hour in-memory cache |
-| `minStars` | number (default: `50`) | Minimum repo star count (all endpoints) |
+| `cache` | `no` | Refresh from GitHub if the cached data is at least 5 minutes old (SVG endpoints) |
+| `minStars` | number (default: `50`) | Minimum repo star count (card, recent, top-repos, badge; the activity graph is unfiltered) |
 
 ### Dark mode with `<picture>` tags
 
@@ -98,8 +98,8 @@ For GitHub profile READMEs that respect the viewer's theme preference:
 ## Caching
 
 - **CDN:** 1 hour max-age + 10 min stale-while-revalidate (configured in `vercel.json`)
-- **In-memory:** 1 hour TTL with 24-hour stale fallback
-- **Cache bypass:** Append `?cache=no` to any endpoint
+- **In-memory:** 1 hour TTL with 24-hour stale fallback, capped at 500 entries per cache (oldest evicted first). All endpoints share one GitHub fetch per user.
+- **Refresh:** Append `?cache=no` to an SVG endpoint to refetch, at most once per user every 5 minutes, so public requests cannot drain the server's GitHub token
 - **Error responses:** Badge errors are not cached at the CDN level (`no-cache, no-store`)
 
 ## Self-hosting
@@ -115,7 +115,7 @@ Deploy your own instance to Vercel:
 
 ```bash
 pnpm install       # Install dependencies
-pnpm test          # Run all tests (102 tests across 8 files)
+pnpm test          # Run all tests (127 tests across 12 files)
 pnpm run typecheck # TypeScript check
 vercel dev         # Local dev server
 ```
@@ -131,7 +131,10 @@ api/
 └── badge/[username].ts     # Shields.io badge endpoint (JSON, standalone)
 lib/
 ├── endpoint-handler.ts     # Shared handler factory (cache, timeout, error SVGs)
-├── github-data.ts          # GitHub API data fetching + types
+├── contribution-cache.ts   # Per-user GitHub data cache shared by all endpoints
+├── github-data.ts          # GitHub GraphQL data fetching + types
+├── min-stars.ts            # minStars parsing + filtered stats shared by card and badge
+├── bounded-map.ts          # Size-capped Map helper for in-memory caches
 ├── svg-card.ts             # Stats card SVG renderer
 ├── svg-top-repos.ts        # Top contributed repos SVG renderer
 ├── svg-recent.ts           # Recent contributions SVG renderer
@@ -141,7 +144,7 @@ lib/
 └── *.test.ts               # Co-located tests
 ```
 
-All SVG endpoints use the shared `createWidgetHandler` factory. The recent and top-repos endpoints use the factory's `transform` callback for star-count filtering (`minStars`). The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG.
+All SVG endpoints use the shared `createWidgetHandler` factory. The card, recent and top-repos endpoints use the factory's `transform` callback for star-count filtering (`minStars`). The badge endpoint is standalone because it returns JSON (Shields.io format) rather than SVG, but reads the same shared contribution data.
 
 ## License
 

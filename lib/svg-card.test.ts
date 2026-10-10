@@ -15,6 +15,9 @@ const sampleData: ContributionData = {
   streak: 3,
   topRepos: [],
   repoStars: {},
+  externalMergedPRs: [],
+  externalClosedUnmergedByRepo: {},
+  externalOpenByRepo: {},
 };
 
 describe('renderStatsCard', () => {

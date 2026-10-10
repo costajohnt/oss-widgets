@@ -15,8 +15,11 @@ oss-widgets is a standalone Vercel deployment serving live SVG widgets for GitHu
 - `/api/badge/[username]` — Shields.io JSON badge endpoint (standalone, returns JSON not SVG)
 
 Key modules in `lib/`:
-- `endpoint-handler.ts` — Factory with in-memory cache (1hr TTL, 24hr stale fallback), error SVGs, theme support
-- `github-data.ts` — Octokit-based GitHub Search API data fetcher, types (`ContributionData`, `ThemeMode`)
+- `endpoint-handler.ts` — Factory with in-memory cache (1hr TTL, 24hr stale fallback, size-capped), error SVGs, theme support
+- `contribution-cache.ts` — Per-user `ContributionData` cache shared by every endpoint including the badge; `?cache=no` only refetches entries at least 5 minutes old
+- `github-data.ts` — Octokit GraphQL search fetcher (merged, open and closed-unmerged PRs with repo stars inline), types (`ContributionData`, `ThemeMode`)
+- `min-stars.ts` — `parseMinStars` (use the parsed value in cache keys) and `qualifyingStats`, the single filtered population for the card and badge
+- `bounded-map.ts` — `setBounded` for size-capped in-memory caches
 - `svg-card.ts`, `svg-recent.ts`, `svg-activity.ts`, `svg-top-repos.ts` — Pure SVG string renderers
 - `svg-utils.ts` — Shared theme colors, SVG wrapper, icons, utilities
 - `vercel-types.ts` — Shared Vercel request/response type shims
@@ -43,6 +46,6 @@ Deployed to Vercel. Requires `GITHUB_TOKEN` environment variable in Vercel proje
 
 - No build step — Vercel compiles TypeScript directly
 - Tests co-located with source in `lib/` and `api/badge/`
-- All endpoints support `?theme=dark|light` and `?cache=no` query params
-- top-repos, recent, badge support `?minStars=N` (default 50) to filter by repo star count
-- All SVG endpoints use the `createWidgetHandler` factory; recent and top-repos use its `transform` callback for star filtering. Badge is the only standalone handler (returns JSON, not SVG).
+- SVG endpoints support `?theme=dark|light` and `?cache=no` query params
+- card, top-repos, recent, badge support `?minStars=N` (default 50) to filter by repo star count; activity does not
+- All SVG endpoints use the `createWidgetHandler` factory; card, recent and top-repos use its `transform` callback for star filtering. Badge is the only standalone handler (returns JSON, not SVG).
