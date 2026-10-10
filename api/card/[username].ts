@@ -29,7 +29,12 @@ export default createWidgetHandler({
       closedUnmerged: stats.closedUnmerged,
       mergeRate: stats.mergeRate,
       repoCount: stats.topRepos.length,
-      cappedMerged: false,
+      // The fetch is capped (search result limits), so the filtered counts
+      // are lower bounds whenever the source was; keep its flags so the card
+      // renders `N+` and an approximate merge rate instead of exact-looking
+      // numbers.
+      cappedMerged: data.cappedMerged,
+      cappedClosedUnmerged: data.cappedClosedUnmerged,
       topRepos: stats.topRepos,
       dailyActivity,
       streak: computeStreak(dailyActivity),

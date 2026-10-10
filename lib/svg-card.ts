@@ -55,7 +55,9 @@ export function renderStatsCard(data: ContributionData, mode: ThemeMode): string
 
   // 4 metrics in a 2x2 grid
   const mergedLabel = data.cappedMerged ? `${data.merged}+` : `${data.merged}`;
-  const mergeRateLabel = `${Math.round(data.mergeRate)}%`;
+  // Counts truncated by the search cap make the rate an estimate.
+  const rateApprox = data.cappedMerged || data.cappedClosedUnmerged ? '~' : '';
+  const mergeRateLabel = `${rateApprox}${Math.round(data.mergeRate)}%`;
   const streakLabel = `${data.streak} week${data.streak !== 1 ? 's' : ''}`;
 
   const metrics: Array<{ value: string; label: string; color: string }> = [

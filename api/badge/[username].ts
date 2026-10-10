@@ -50,7 +50,10 @@ export async function computeBadge(username: string, minStars: number): Promise<
   const stats = qualifyingStats(data, minStars);
   // mergeRate here is 0-1, unlike ContributionData.mergeRate which is 0-100
   const mergeRate = stats.mergeRate / 100;
-  const mergeRatePct = `${stats.mergeRate.toFixed(0)}%`;
+  // Capped fetches undercount: merged is a lower bound and the rate an estimate.
+  const rateApprox = data.cappedMerged || data.cappedClosedUnmerged ? '~' : '';
+  const mergeRatePct = `${rateApprox}${stats.mergeRate.toFixed(0)}%`;
+  const mergedLabel = data.cappedMerged ? `${stats.merged}+` : `${stats.merged}`;
 
   if (stats.merged === 0 && stats.open === 0) {
     return { schemaVersion: 1, label: 'OSS Contributions', message: 'Getting Started', color: 'blue' };
@@ -59,7 +62,7 @@ export async function computeBadge(username: string, minStars: number): Promise<
   return {
     schemaVersion: 1,
     label: 'OSS Contributions',
-    message: `${mergeRatePct} merge rate | ${stats.merged} merged | ${stats.open} open`,
+    message: `${mergeRatePct} merge rate | ${mergedLabel} merged | ${stats.open} open`,
     color: pickColor(mergeRate),
   };
 }
