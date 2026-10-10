@@ -1,7 +1,6 @@
 import { createWidgetHandler } from '../../lib/endpoint-handler.js';
+import { parseMinStars } from '../../lib/min-stars.js';
 import { renderRecentCard } from '../../lib/svg-recent.js';
-
-const DEFAULT_MIN_STARS = 50;
 
 export default createWidgetHandler({
   prefix: 'recent',
@@ -9,12 +8,12 @@ export default createWidgetHandler({
   errorHeight: 80,
   errorTextY: 45,
   render: renderRecentCard,
-  cacheKeyParams: ['minStars'],
+  cacheKeySuffix: (query) => `minStars=${parseMinStars(query.minStars)}`,
   transform: (data, query) => {
-    const parsed = typeof query.minStars === 'string' ? parseInt(query.minStars, 10) : NaN;
-    const minStars = Number.isNaN(parsed) ? DEFAULT_MIN_STARS : Math.max(0, parsed);
-
-    const filtered = data.recentPRs.filter((pr) => (data.repoStars[pr.repo] ?? 0) >= minStars);
-    return { ...data, recentPRs: filtered };
+    const minStars = parseMinStars(query.minStars);
+    // Filter the full merge-date-sorted list first, then take 5, so low-star
+    // repos never crowd out older qualifying PRs.
+    const recentPRs = data.externalMergedPRs.filter((pr) => (data.repoStars[pr.repo] ?? 0) >= minStars).slice(0, 5);
+    return { ...data, recentPRs };
   },
 });

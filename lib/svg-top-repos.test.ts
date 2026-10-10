@@ -21,6 +21,9 @@ const baseData: ContributionData = {
     { repo: 'sindresorhus/eslint-plugin-unicorn', count: 6 },
   ],
   repoStars: {},
+  externalMergedPRs: [],
+  externalClosedUnmergedByRepo: {},
+  externalOpenByRepo: {},
 };
 
 describe('renderTopReposCard', () => {

@@ -1,7 +1,7 @@
 import { createWidgetHandler } from '../../lib/endpoint-handler.js';
+import { computeStreak } from '../../lib/github-data.js';
+import { parseMinStars, qualifyingStats } from '../../lib/min-stars.js';
 import { renderStatsCard } from '../../lib/svg-card.js';
-
-const DEFAULT_MIN_STARS = 50;
 
 export default createWidgetHandler({
   prefix: 'card',
@@ -9,20 +9,30 @@ export default createWidgetHandler({
   errorHeight: 195,
   errorTextY: 100,
   render: renderStatsCard,
-  cacheKeyParams: ['minStars'],
+  cacheKeySuffix: (query) => `minStars=${parseMinStars(query.minStars)}`,
   transform: (data, query) => {
-    const parsed = typeof query.minStars === 'string' ? parseInt(query.minStars, 10) : NaN;
-    const minStars = Number.isNaN(parsed) ? DEFAULT_MIN_STARS : Math.max(0, parsed);
+    // Every number on the card describes the same population: PRs to external
+    // repos with at least minStars stars (matching the badge).
+    const stats = qualifyingStats(data, parseMinStars(query.minStars));
 
-    const qualifying = data.topRepos.filter((r) => (data.repoStars[r.repo] ?? 0) >= minStars);
-    const filteredMerged = qualifying.reduce((sum, r) => sum + r.count, 0);
+    const dailyActivity: Record<string, number> = {};
+    for (const pr of stats.mergedPRs) {
+      if (!pr.mergedAt) continue;
+      const day = pr.mergedAt.slice(0, 10);
+      dailyActivity[day] = (dailyActivity[day] ?? 0) + 1;
+    }
 
     return {
       ...data,
-      merged: filteredMerged,
-      repoCount: qualifying.length,
+      merged: stats.merged,
+      open: stats.open,
+      closedUnmerged: stats.closedUnmerged,
+      mergeRate: stats.mergeRate,
+      repoCount: stats.topRepos.length,
       cappedMerged: false,
-      topRepos: qualifying,
+      topRepos: stats.topRepos,
+      dailyActivity,
+      streak: computeStreak(dailyActivity),
     };
   },
 });

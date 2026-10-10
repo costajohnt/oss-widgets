@@ -6,11 +6,14 @@ import {
 } from './github-data.js';
 import { getContributionData } from './contribution-cache.js';
 import { escapeXml, theme as getTheme } from './svg-utils.js';
+import { setBounded } from './bounded-map.js';
 import type { VercelRequest, VercelResponse } from './vercel-types.js';
 
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const STALE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 const TIMEOUT_MS = 25_000;
+/** Cap on cached SVGs per widget instance; oldest entries are evicted first. */
+const MAX_CACHE_ENTRIES = 500;
 
 interface CacheEntry {
   svg: string;
@@ -31,8 +34,11 @@ export interface WidgetHandlerConfig {
    * The returned data replaces the original for rendering.
    */
   transform?: (data: ContributionData, query: Record<string, string | string[]>) => Promise<ContributionData> | ContributionData;
-  /** Extra query param keys to include in the cache key (e.g., ['minStars']). */
-  cacheKeyParams?: string[];
+  /**
+   * Extra cache-key component derived from the query (e.g., the parsed minStars).
+   * Return normalized values, not raw strings, so equivalent requests share an entry.
+   */
+  cacheKeySuffix?: (query: Record<string, string | string[]>) => string;
 }
 
 function makeErrorSvg(message: string, mode: ThemeMode, config: WidgetHandlerConfig): string {
@@ -45,7 +51,7 @@ function makeErrorSvg(message: string, mode: ThemeMode, config: WidgetHandlerCon
 }
 
 export function createWidgetHandler(config: WidgetHandlerConfig) {
-  const { prefix, render, transform, cacheKeyParams } = config;
+  const { prefix, render, transform, cacheKeySuffix } = config;
   const cache = new Map<string, CacheEntry>();
 
   function errorSvg(message: string, mode: ThemeMode): string {
@@ -71,14 +77,9 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       return res.status(500).send(errorSvg('Server configuration error: missing GitHub token', mode));
     }
 
-    // Build cache key including any extra query params (e.g., minStars)
+    // Build cache key including any normalized extra params (e.g., minStars)
     let cacheKey = `${prefix}:${username}:${mode}`;
-    if (cacheKeyParams) {
-      for (const key of cacheKeyParams) {
-        const val = req.query[key];
-        if (typeof val === 'string') cacheKey += `:${key}=${val}`;
-      }
-    }
+    if (cacheKeySuffix) cacheKey += `:${cacheKeySuffix(req.query)}`;
 
     if (!noCache) {
       const cached = cache.get(cacheKey);
@@ -151,7 +152,7 @@ export function createWidgetHandler(config: WidgetHandlerConfig) {
       res.setHeader('Cache-Control', 'no-cache, no-store');
       return res.status(500).send(makeErrorSvg('Render error', mode, config));
     }
-    cache.set(cacheKey, { svg, ts: Date.now() });
+    setBounded(cache, cacheKey, { svg, ts: Date.now() }, MAX_CACHE_ENTRIES);
     return res.status(200).send(svg);
   };
 }

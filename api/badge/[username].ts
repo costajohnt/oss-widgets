@@ -1,10 +1,8 @@
-import { Octokit } from '@octokit/rest';
-import { isValidUsername, extractRepo } from '../../lib/github-data.js';
-import { getStarsForRepos } from '../../lib/github-stars.js';
+import { isValidUsername, type ContributionError } from '../../lib/github-data.js';
+import { getContributionData } from '../../lib/contribution-cache.js';
+import { parseMinStars, qualifyingStats } from '../../lib/min-stars.js';
+import { setBounded } from '../../lib/bounded-map.js';
 import type { VercelRequest, VercelResponse } from '../../lib/vercel-types.js';
-
-/** Minimum star count for a repo's PRs to be included — filters out personal/trivial repos. */
-const DEFAULT_MIN_STARS = 50;
 
 const FUNCTION_TIMEOUT_MS = 25_000;
 
@@ -32,78 +30,36 @@ export function pickColor(mergeRate: number): ShieldsColor {
 export const badgeCache = new Map<string, { badge: BadgeResponse; ts: number }>();
 const BADGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const STALE_BADGE_TTL = 24 * 60 * 60 * 1000; // 24 hours — fallback during timeouts/errors
+/** Cap on cached badges per instance; oldest entries are evicted first. */
+const MAX_BADGE_CACHE_ENTRIES = 500;
 
-interface PRItem {
-  repository_url: string;
-}
-
-/** Fetch all PR items for a search query (up to 1000, GitHub's limit). */
-export async function fetchAllPRs(octokit: Octokit, query: string): Promise<PRItem[]> {
-  const items: PRItem[] = [];
-  let page = 1;
-  while (true) {
-    const { data } = await octokit.search.issuesAndPullRequests({
-      q: query,
-      per_page: 100,
-      page,
-    });
-    items.push(...data.items);
-    // Cap at 10 pages (= 1000 items, matching GitHub's search result limit)
-    if (items.length >= data.total_count || items.length >= 1000 || data.items.length === 0) break;
-    page++;
-  }
-  return items;
-}
-
-/** Compute badge data by fetching PR stats from GitHub API. */
-export async function computeBadge(username: string, minStars: number): Promise<BadgeResponse> {
+/**
+ * Compute badge data from the shared contribution data (GraphQL, star counts
+ * inline, cached per user across all widgets). Counts only PRs to external
+ * repos with at least `minStars` stars in the 12-month window, plus open PRs
+ * to those repos. Returns a ContributionError when the fetch failed.
+ */
+export async function computeBadge(username: string, minStars: number): Promise<BadgeResponse | ContributionError> {
   if (!process.env.GITHUB_TOKEN) {
     return errorBadge('server config error');
   }
-  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-  // 12-month window to match other widgets
-  const since = new Date();
-  since.setFullYear(since.getFullYear() - 1);
-  const sinceDate = since.toISOString().slice(0, 10);
+  const data = await getContributionData(username, process.env.GITHUB_TOKEN);
+  if (data.error) return data;
 
-  // Fetch all three categories excluding user's own repos
-  const baseQuery = `is:pr author:${username} -user:${username}`;
-
-  const [mergedItems, closedItems, openItems] = await Promise.all([
-    fetchAllPRs(octokit, `${baseQuery} is:merged merged:>=${sinceDate}`),
-    fetchAllPRs(octokit, `${baseQuery} is:closed is:unmerged closed:>=${sinceDate}`),
-    fetchAllPRs(octokit, `${baseQuery} is:open`),
-  ]);
-
-  // Collect unique repos across all PRs
-  const allItems = [...mergedItems, ...closedItems, ...openItems];
-  const uniqueRepos = [...new Set(allItems.map((item) => extractRepo(item.repository_url)))];
-
-  // Fetch star counts for all unique repos (parallelized, with 24hr caching)
-  const repoStarsMap = await getStarsForRepos(octokit, uniqueRepos);
-
-  // Filter qualifying repos
-  const qualifyingRepos = new Set(uniqueRepos.filter((repo) => (repoStarsMap.get(repo) ?? 0) >= minStars));
-
-  // Count PRs only from qualifying repos
-  const mergedCount = mergedItems.filter((item) => qualifyingRepos.has(extractRepo(item.repository_url))).length;
-  const closedCount = closedItems.filter((item) => qualifyingRepos.has(extractRepo(item.repository_url))).length;
-  const openCount = openItems.filter((item) => qualifyingRepos.has(extractRepo(item.repository_url))).length;
-
-  const total = mergedCount + closedCount;
+  const stats = qualifyingStats(data, minStars);
   // mergeRate here is 0-1, unlike ContributionData.mergeRate which is 0-100
-  const mergeRate = total > 0 ? mergedCount / total : 0;
-  const mergeRatePct = `${(mergeRate * 100).toFixed(0)}%`;
+  const mergeRate = stats.mergeRate / 100;
+  const mergeRatePct = `${stats.mergeRate.toFixed(0)}%`;
 
-  if (mergedCount === 0 && openCount === 0) {
+  if (stats.merged === 0 && stats.open === 0) {
     return { schemaVersion: 1, label: 'OSS Contributions', message: 'Getting Started', color: 'blue' };
   }
 
   return {
     schemaVersion: 1,
     label: 'OSS Contributions',
-    message: `${mergeRatePct} merge rate | ${mergedCount} merged | ${openCount} open`,
+    message: `${mergeRatePct} merge rate | ${stats.merged} merged | ${stats.open} open`,
     color: pickColor(mergeRate),
   };
 }
@@ -125,8 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(errorBadge('invalid username'));
   }
 
-  const parsed = typeof minStarsParam === 'string' ? parseInt(minStarsParam, 10) : NaN;
-  const minStars = Number.isNaN(parsed) ? DEFAULT_MIN_STARS : Math.max(0, parsed);
+  const minStars = parseMinStars(minStarsParam);
 
   const cacheKey = `${username}:${minStars}`;
   const cached = badgeCache.get(cacheKey);
@@ -157,7 +112,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(staleFallback(cacheKey, 'timeout'));
     }
 
-    badgeCache.set(cacheKey, { badge: result, ts: Date.now() });
+    if ('error' in result && result.error) {
+      res.setHeader('Cache-Control', 'no-cache, no-store');
+      if (result.error === 'user_not_found') {
+        return res.status(200).json(errorBadge('user not found'));
+      }
+      if (result.error === 'rate_limited') {
+        console.warn('[badge] GitHub API rate limited for', username);
+        return res.status(200).json(staleFallback(cacheKey, 'rate limited'));
+      }
+      return res.status(200).json(staleFallback(cacheKey, result.error));
+    }
+
+    setBounded(badgeCache, cacheKey, { badge: result, ts: Date.now() }, MAX_BADGE_CACHE_ENTRIES);
     return res.status(200).json(result);
   } catch (error: unknown) {
     const status = error instanceof Object && 'status' in error ? (error as { status: number }).status : undefined;

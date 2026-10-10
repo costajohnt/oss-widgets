@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fetchContributionData, computeStreak } from './github-data.js';
 
-const { searchMock, graphqlMock } = vi.hoisted(() => {
+// graphqlMock serves the merged-PR query; openMock and closedMock serve the
+// open and closed-unmerged repo-count queries. Routing by search string keeps
+// the three concurrent queries from consuming each other's queued responses.
+const { searchMock, graphqlMock, openMock, closedMock } = vi.hoisted(() => {
   const searchMock = vi.fn();
   const graphqlMock = vi.fn();
-  return { searchMock, graphqlMock };
+  const openMock = vi.fn();
+  const closedMock = vi.fn();
+  return { searchMock, graphqlMock, openMock, closedMock };
 });
 
 vi.mock('@octokit/rest', () => {
@@ -13,10 +18,36 @@ vi.mock('@octokit/rest', () => {
       this.rest = {
         search: { issuesAndPullRequests: searchMock },
       };
-      this.graphql = graphqlMock;
+      this.graphql = (query: string, vars: { q: string; after: string | null }) => {
+        if (vars.q.includes('is:merged')) return graphqlMock(query, vars);
+        if (vars.q.includes('is:open')) return openMock(query, vars);
+        return closedMock(query, vars);
+      };
     }),
   };
 });
+
+/** Build a repo-count GraphQL page: one node per PR, `count` PRs in each repo. */
+function countPage(
+  totalCount: number,
+  byRepo: Record<string, number> = {},
+  starsByRepo: Record<string, number> = {},
+  hasNextPage: boolean = false,
+  endCursor: string | null = null,
+) {
+  const nodes = Object.entries(byRepo).flatMap(([repo, count]) =>
+    Array.from({ length: count }, () => ({
+      repository: { nameWithOwner: repo, stargazerCount: starsByRepo[repo] ?? 0 },
+    })),
+  );
+  return { search: { issueCount: totalCount, pageInfo: { hasNextPage, endCursor }, nodes } };
+}
+
+/** Queue open and closed-unmerged totals (no per-repo nodes). */
+function mockCounts(open: number, closed: number) {
+  openMock.mockResolvedValueOnce(countPage(open));
+  closedMock.mockResolvedValueOnce(countPage(closed));
+}
 
 interface RestLikeItem {
   number: number;
@@ -58,7 +89,9 @@ function gqlPage(
 
 describe('fetchContributionData', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    openMock.mockResolvedValue(countPage(0));
+    closedMock.mockResolvedValue(countPage(0));
   });
 
   it('returns contribution stats for a valid user', async () => {
@@ -81,8 +114,7 @@ describe('fetchContributionData', () => {
       },
     ];
     graphqlMock.mockResolvedValueOnce(gqlPage(items, items.length, false, null, { 'org/repo': 100, 'org/repo2': 50 }));
-    searchMock.mockResolvedValueOnce({ data: { total_count: 3, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 5, items: [] } });
+    mockCounts(3, 5);
 
     const result = await fetchContributionData('testuser', 'fake-token');
 
@@ -128,9 +160,8 @@ describe('fetchContributionData', () => {
     graphqlMock.mockResolvedValueOnce(
       gqlPage(ascItems, 2500, false, null, { 'external/popular': 800 }),
     );
-    // Open + closed-unmerged via REST search
-    searchMock.mockResolvedValueOnce({ data: { total_count: 10, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 20, items: [] } });
+    // Open + closed-unmerged via GraphQL repo-count queries
+    mockCounts(10, 20);
 
     const result = await fetchContributionData('prolific-user', 'fake-token');
 
@@ -140,7 +171,7 @@ describe('fetchContributionData', () => {
     // 200 unique items < 2500 totalCount → capped
     expect(result.cappedMerged).toBe(true);
     expect(graphqlMock).toHaveBeenCalledTimes(2);
-    expect(searchMock).toHaveBeenCalledTimes(2);
+    expect(searchMock).not.toHaveBeenCalled();
     expect(result.topRepos).toEqual([{ repo: 'external/popular', count: 200 }]);
     expect(result.repoStars).toEqual({ 'external/popular': 800 });
   });
@@ -167,8 +198,7 @@ describe('fetchContributionData', () => {
     }));
     graphqlMock.mockResolvedValueOnce(gqlPage(firstPass, 150, false, null, { 'external/lib': 500 }));
     graphqlMock.mockResolvedValueOnce(gqlPage(secondPass, 150, false, null, { 'external/lib': 500 }));
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    mockCounts(0, 0);
 
     const result = await fetchContributionData('user', 'fake-token');
 
@@ -191,8 +221,7 @@ describe('fetchContributionData', () => {
       pull_request: { merged_at: '2026-03-01T00:00:00Z' },
     }));
     graphqlMock.mockResolvedValueOnce(gqlPage(items, 5, false, null, { 'external/lib': 100 }));
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    mockCounts(0, 0);
 
     const result = await fetchContributionData('user', 'fake-token');
 
@@ -222,8 +251,7 @@ describe('fetchContributionData', () => {
     }));
     graphqlMock.mockResolvedValueOnce(gqlPage(items, 150, true, 'cursor1'));
     graphqlMock.mockResolvedValueOnce(gqlPage(items50, 150, false, null));
-    searchMock.mockResolvedValueOnce({ data: { total_count: 5, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 10, items: [] } });
+    mockCounts(5, 10);
 
     const result = await fetchContributionData('testuser', 'fake-token');
 
@@ -286,8 +314,7 @@ describe('fetchContributionData', () => {
     ];
 
     graphqlMock.mockResolvedValueOnce(gqlPage(items, items.length, false, null));
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
-    searchMock.mockResolvedValueOnce({ data: { total_count: 0, items: [] } });
+    mockCounts(0, 0);
 
     const result = await fetchContributionData('myuser', 'fake-token');
 
@@ -298,6 +325,80 @@ describe('fetchContributionData', () => {
       { repo: 'other/lib', count: 1 },
     ]);
     expect(result.repoCount).toBe(3);
+  });
+});
+
+describe('fetchContributionData: recent PRs and per-repo open/closed counts', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    openMock.mockResolvedValue(countPage(0));
+    closedMock.mockResolvedValue(countPage(0));
+  });
+
+  function merged(n: number, repo: string, mergedAt: string): RestLikeItem {
+    return {
+      number: n,
+      title: `PR ${n}`,
+      html_url: `https://github.com/${repo}/pull/${n}`,
+      repository_url: `https://api.github.com/repos/${repo}`,
+      closed_at: mergedAt,
+      pull_request: { merged_at: mergedAt },
+    };
+  }
+
+  it('keeps every external merged PR sorted by merge date, not search (update) order', async () => {
+    // Search returns updated-desc: the first item was merged long ago but updated today.
+    const items = [
+      merged(1, 'ext/a', '2025-12-01T00:00:00Z'),
+      merged(2, 'ext/b', '2026-03-05T00:00:00Z'),
+      merged(3, 'me/own', '2026-03-06T00:00:00Z'),
+      merged(4, 'ext/c', '2026-03-04T00:00:00Z'),
+      merged(5, 'ext/d', '2026-03-03T00:00:00Z'),
+      merged(6, 'ext/e', '2026-03-02T00:00:00Z'),
+      merged(7, 'ext/f', '2026-03-01T00:00:00Z'),
+      merged(8, 'ext/g', '2026-02-01T00:00:00Z'),
+    ];
+    graphqlMock.mockResolvedValueOnce(gqlPage(items, items.length));
+
+    const result = await fetchContributionData('me', 'fake-token');
+    if ('error' in result && result.error) throw new Error('unexpected error');
+
+    expect(result.externalMergedPRs.map((pr) => pr.number)).toEqual([2, 4, 5, 6, 7, 8, 1]);
+    expect(result.recentPRs.map((pr) => pr.number)).toEqual([2, 4, 5, 6, 7]);
+  });
+
+  it('fetches open and closed-unmerged counts per external repo via GraphQL with stars inline', async () => {
+    graphqlMock.mockResolvedValueOnce(gqlPage([merged(1, 'ext/a', '2026-03-01T00:00:00Z')], 1, false, null, { 'ext/a': 100 }));
+    openMock.mockReset();
+    closedMock.mockReset();
+    openMock.mockResolvedValueOnce(countPage(3, { 'ext/a': 1, 'ext/b': 1, 'me/own': 1 }, { 'ext/a': 100, 'ext/b': 7, 'me/own': 1 }));
+    closedMock.mockResolvedValueOnce(countPage(2, { 'ext/c': 2 }, { 'ext/c': 900 }));
+
+    const result = await fetchContributionData('me', 'fake-token');
+    if ('error' in result && result.error) throw new Error('unexpected error');
+
+    expect(result.open).toBe(3);
+    expect(result.closedUnmerged).toBe(2);
+    expect(result.externalOpenByRepo).toEqual({ 'ext/a': 1, 'ext/b': 1 });
+    expect(result.externalClosedUnmergedByRepo).toEqual({ 'ext/c': 2 });
+    expect(result.repoStars).toEqual({ 'ext/a': 100, 'ext/b': 7, 'me/own': 1, 'ext/c': 900 });
+    expect(result.cappedClosedUnmerged).toBe(false);
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it('paginates repo-count queries and flags closed-unmerged as capped when results fall short', async () => {
+    graphqlMock.mockResolvedValueOnce(gqlPage([], 0));
+    closedMock.mockReset();
+    closedMock.mockResolvedValueOnce(countPage(1500, { 'ext/a': 100 }, {}, true, 'c1'));
+    closedMock.mockResolvedValueOnce(countPage(1500, { 'ext/a': 50 }, {}, false, null));
+
+    const result = await fetchContributionData('me', 'fake-token');
+    if ('error' in result && result.error) throw new Error('unexpected error');
+
+    expect(closedMock).toHaveBeenCalledTimes(2);
+    expect(result.externalClosedUnmergedByRepo).toEqual({ 'ext/a': 150 });
+    expect(result.closedUnmerged).toBe(1500);
+    expect(result.cappedClosedUnmerged).toBe(true);
   });
 });
 
